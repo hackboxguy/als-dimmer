@@ -1,0 +1,19 @@
+{
+  "sensor": {
+    "type": "opti4001"
+  },
+
+  "output": {
+    "type": "file",
+    "file_path": "/tmp/brightness.txt"
+  },
+
+  "zones": [
+    {
+      "name": "test",
+      "lux_range": [0, 100],
+      "brightness_range": [0, 100],
+      "curve": "linear"
+    }
+  ]
+}
