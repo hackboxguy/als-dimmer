@@ -196,7 +196,7 @@ void Config::validate() const {
     }
 
     // Type-specific validation
-    if (sensor.type == "opti4001" || sensor.type == "veml7700" || sensor.type == "custom_i2c") {
+    if (sensor.type == "opti4001" || sensor.type == "veml7700" || sensor.type == "custom_i2c" || sensor.type == "fpga_opti4001") {
         if (sensor.device.empty()) {
             throw ConfigError("sensor.device is required for I2C sensor types");
         }

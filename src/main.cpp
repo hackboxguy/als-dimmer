@@ -20,6 +20,7 @@ namespace als_dimmer {
 // Forward declarations
 std::unique_ptr<SensorInterface> createFileSensor(const std::string& file_path);
 std::unique_ptr<SensorInterface> createOPTI4001Sensor(const std::string& device, const std::string& address);
+std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address);
 
 std::unique_ptr<OutputInterface> createFileOutput(const std::string& file_path);
 #ifdef HAVE_DDCUTIL
@@ -37,6 +38,8 @@ std::unique_ptr<als_dimmer::SensorInterface> createSensor(const als_dimmer::Conf
         return als_dimmer::createFileSensor(config.sensor.file_path);
     } else if (config.sensor.type == "opti4001") {
         return als_dimmer::createOPTI4001Sensor(config.sensor.device, config.sensor.address);
+    } else if (config.sensor.type == "fpga_opti4001") {
+        return als_dimmer::createFPGAOpti4001Sensor(config.sensor.device, config.sensor.address);
     }
     LOG_ERROR("factory", "Unsupported sensor type: " << config.sensor.type);
     return nullptr;

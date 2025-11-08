@@ -7,6 +7,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Build options
 option(USE_DDCUTIL "Build with DDC/CI support via libddcutil" OFF)
+option(INSTALL_SYSTEMD_SERVICE "Install systemd service file" OFF)
+set(CONFIG_FILE "config_opti4001_ddcutil.json" CACHE STRING "Default config file to use")
 
 # Core sources (always compiled)
 set(CORE_SOURCES
@@ -18,6 +20,7 @@ set(CORE_SOURCES
     src/brightness_controller.cpp
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
+    src/sensors/fpga_opti4001_sensor.cpp
     src/outputs/file_output.cpp
     src/outputs/i2c_dimmer_output.cpp
 )
@@ -55,12 +58,36 @@ target_compile_options(als-dimmer PRIVATE
     -Wall -Wextra -Wpedantic -Werror
 )
 
+# Configure systemd service file with CMAKE_INSTALL_PREFIX
+if(INSTALL_SYSTEMD_SERVICE)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/systemd/als-dimmer.service.in
+        ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer.service
+        @ONLY
+    )
+endif()
+
 # Install rules
 install(TARGETS als-dimmer DESTINATION bin)
-install(FILES configs/config_opti4001_ddcutil.json
-    DESTINATION /etc/als-dimmer
-    RENAME config.json
-    OPTIONAL)
-install(FILES systemd/als-dimmer.service
-    DESTINATION /lib/systemd/system
-    OPTIONAL)
+
+# Install all config files to PREFIX/etc/als-dimmer/
+file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/configs/*.json")
+install(FILES ${CONFIG_FILES}
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/etc/als-dimmer)
+
+# Create symlink for default config
+install(CODE "
+    file(CREATE_LINK
+        ${CONFIG_FILE}
+        \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/etc/als-dimmer/config.json\"
+        SYMBOLIC
+    )
+    message(STATUS \"Created symlink: config.json -> ${CONFIG_FILE}\")
+")
+
+# Install systemd service if enabled
+if(INSTALL_SYSTEMD_SERVICE)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer.service
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system)
+    message(STATUS "Systemd service will be installed to ${CMAKE_INSTALL_PREFIX}/lib/systemd/system")
+endif()

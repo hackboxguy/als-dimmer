@@ -1,0 +1,57 @@
+{
+  "sensor": {
+    "type": "fpga_opti4001",
+    "device": "/dev/i2c-1",
+    "address": "0x1D"
+  },
+
+  "output": {
+    "type": "dimmer200",
+    "device": "/dev/i2c-1",
+    "address": "0x1D"
+  },
+
+  "control": {
+    "listen_address": "127.0.0.1",
+    "listen_port": 9000,
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/tmp/als-dimmer-state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info"
+  },
+
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 10],
+      "brightness_range": [5, 30],
+      "curve": "logarithmic",
+      "step_sizes": {"large": 5, "medium": 2, "small": 1},
+      "error_thresholds": {"large": 20, "small": 5}
+    },
+    {
+      "name": "indoor",
+      "lux_range": [10, 500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": {"large": 8, "medium": 3, "small": 1},
+      "error_thresholds": {"large": 25, "small": 8}
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": {"large": 10, "medium": 4, "small": 2},
+      "error_thresholds": {"large": 30, "small": 10}
+    }
+  ],
+
+  "calibration": {
+    "enabled": false,
+    "sample_duration_sec": 60,
+    "auto_adjust_zones": true
+  }
+}
