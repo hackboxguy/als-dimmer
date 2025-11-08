@@ -52,9 +52,30 @@ struct Zone {
     ErrorThresholds error_thresholds;
 };
 
-struct ControlConfig {
+struct TcpSocketConfig {
+    bool enabled = true;
     std::string listen_address = "127.0.0.1";
     int listen_port = 9000;
+};
+
+struct UnixSocketConfig {
+    bool enabled = true;
+    std::string path = "/tmp/als-dimmer.sock";
+    std::string permissions = "0660";
+    std::string owner = "root";
+    std::string group = "root";
+};
+
+struct ControlConfig {
+    // Socket configuration
+    TcpSocketConfig tcp_socket;
+    UnixSocketConfig unix_socket;
+
+    // Legacy fields (for backward compatibility with old configs)
+    std::string listen_address = "127.0.0.1";
+    int listen_port = 9000;
+
+    // Control settings
     int update_interval_ms = 500;
     int sensor_error_timeout_sec = 300;
     int fallback_brightness = 50;

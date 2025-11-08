@@ -16,6 +16,7 @@ set(CORE_SOURCES
     src/config.cpp
     src/state_manager.cpp
     src/control_interface.cpp
+    src/json_protocol.cpp
     src/zone_mapper.cpp
     src/brightness_controller.cpp
     src/sensors/file_sensor.cpp

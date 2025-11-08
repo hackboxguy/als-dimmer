@@ -84,12 +84,57 @@ Config Config::loadFromFile(const std::string& filename) {
     if (j.contains("control")) {
         auto& control_json = j["control"];
 
-        if (control_json.contains("listen_address")) {
-            config.control.listen_address = control_json["listen_address"].get<std::string>();
+        // Parse TCP socket configuration (new format)
+        if (control_json.contains("tcp_socket")) {
+            auto& tcp_json = control_json["tcp_socket"];
+            if (tcp_json.contains("enabled")) {
+                config.control.tcp_socket.enabled = tcp_json["enabled"].get<bool>();
+            }
+            if (tcp_json.contains("listen_address")) {
+                config.control.tcp_socket.listen_address = tcp_json["listen_address"].get<std::string>();
+            }
+            if (tcp_json.contains("listen_port")) {
+                config.control.tcp_socket.listen_port = tcp_json["listen_port"].get<int>();
+            }
         }
-        if (control_json.contains("listen_port")) {
-            config.control.listen_port = control_json["listen_port"].get<int>();
+
+        // Parse Unix socket configuration (new format)
+        if (control_json.contains("unix_socket")) {
+            auto& unix_json = control_json["unix_socket"];
+            if (unix_json.contains("enabled")) {
+                config.control.unix_socket.enabled = unix_json["enabled"].get<bool>();
+            }
+            if (unix_json.contains("path")) {
+                config.control.unix_socket.path = unix_json["path"].get<std::string>();
+            }
+            if (unix_json.contains("permissions")) {
+                config.control.unix_socket.permissions = unix_json["permissions"].get<std::string>();
+            }
+            if (unix_json.contains("owner")) {
+                config.control.unix_socket.owner = unix_json["owner"].get<std::string>();
+            }
+            if (unix_json.contains("group")) {
+                config.control.unix_socket.group = unix_json["group"].get<std::string>();
+            }
         }
+
+        // Backward compatibility: Parse legacy listen_address and listen_port
+        // If new tcp_socket config is not present, use legacy fields
+        if (!control_json.contains("tcp_socket")) {
+            if (control_json.contains("listen_address")) {
+                config.control.listen_address = control_json["listen_address"].get<std::string>();
+                config.control.tcp_socket.listen_address = config.control.listen_address;
+            }
+            if (control_json.contains("listen_port")) {
+                config.control.listen_port = control_json["listen_port"].get<int>();
+                config.control.tcp_socket.listen_port = config.control.listen_port;
+            }
+        } else {
+            // New format exists, copy to legacy fields for compatibility
+            config.control.listen_address = config.control.tcp_socket.listen_address;
+            config.control.listen_port = config.control.tcp_socket.listen_port;
+        }
+
         if (control_json.contains("update_interval_ms")) {
             config.control.update_interval_ms = control_json["update_interval_ms"].get<int>();
         }
@@ -274,6 +319,41 @@ void Config::validate() const {
     }
     if (control.fallback_brightness < 0 || control.fallback_brightness > 100) {
         throw ConfigError("control.fallback_brightness must be between 0 and 100");
+    }
+
+    // Validate socket configuration
+    if (control.tcp_socket.listen_port < 1 || control.tcp_socket.listen_port > 65535) {
+        throw ConfigError("control.tcp_socket.listen_port must be between 1 and 65535");
+    }
+    if (control.tcp_socket.listen_address.empty()) {
+        throw ConfigError("control.tcp_socket.listen_address cannot be empty");
+    }
+    if (control.unix_socket.path.empty()) {
+        throw ConfigError("control.unix_socket.path cannot be empty");
+    }
+    // Validate Unix socket permissions format (should be octal string like "0660")
+    if (!control.unix_socket.permissions.empty()) {
+        if (control.unix_socket.permissions.length() < 3 || control.unix_socket.permissions.length() > 4) {
+            throw ConfigError("control.unix_socket.permissions must be 3-4 digit octal string (e.g., '0660')");
+        }
+        for (char c : control.unix_socket.permissions) {
+            if (c < '0' || c > '7') {
+                throw ConfigError("control.unix_socket.permissions must contain only octal digits (0-7)");
+            }
+        }
+    }
+    if (control.unix_socket.owner.empty()) {
+        throw ConfigError("control.unix_socket.owner cannot be empty");
+    }
+    if (control.unix_socket.group.empty()) {
+        throw ConfigError("control.unix_socket.group cannot be empty");
+    }
+
+    // Validate log level
+    if (control.log_level != "trace" && control.log_level != "debug" &&
+        control.log_level != "info" && control.log_level != "warn" &&
+        control.log_level != "error") {
+        throw ConfigError("control.log_level must be one of: trace, debug, info, warn, error");
     }
 }
 

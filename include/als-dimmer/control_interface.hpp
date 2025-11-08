@@ -2,6 +2,7 @@
 #define ALS_DIMMER_CONTROL_INTERFACE_HPP
 
 #include "state_manager.hpp"
+#include "config.hpp"
 #include <string>
 #include <vector>
 #include <thread>
@@ -21,9 +22,14 @@ struct SystemStatus {
     int uptime_sec;
 };
 
+enum class SocketType {
+    TCP,
+    UNIX
+};
+
 class ControlInterface {
 public:
-    ControlInterface(const std::string& listen_address, int listen_port);
+    ControlInterface(const ControlConfig& config);
     ~ControlInterface();
 
     // Start listening for connections
@@ -48,16 +54,26 @@ public:
     void updateStatus(const SystemStatus& status);
 
 private:
-    void acceptClients();
-    void handleClient(int client_fd);
-    std::string processCommand(const std::string& command);
+    void acceptTcpClients();
+    void acceptUnixClients();
+    void handleClient(int client_fd, SocketType socket_type);
+    std::string processJsonCommand(const std::string& json_command);
+    bool createUnixSocket();
+    bool setUnixSocketPermissions();
+    void removeStaleUnixSocket();
 
-    std::string listen_address_;
-    int listen_port_;
-    int server_fd_;
+    ControlConfig config_;
+
+    // TCP socket
+    int tcp_server_fd_;
+    std::thread tcp_accept_thread_;
+
+    // Unix socket
+    int unix_server_fd_;
+    std::thread unix_accept_thread_;
+
     std::atomic<bool> running_;
 
-    std::thread accept_thread_;
     std::vector<std::thread> client_threads_;
     std::vector<int> client_fds_;
     std::mutex clients_mutex_;
@@ -66,6 +82,7 @@ private:
     struct CommandEntry {
         std::string command;
         int client_fd;
+        SocketType socket_type;
     };
     std::vector<CommandEntry> command_queue_;
     std::mutex queue_mutex_;

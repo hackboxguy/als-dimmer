@@ -10,13 +10,24 @@
   },
 
   "control": {
-    "listen_address": "127.0.0.1",
-    "listen_port": 9000,
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0660",
+      "owner": "root",
+      "group": "root"
+    },
     "update_interval_ms": 500,
     "sensor_error_timeout_sec": 300,
     "fallback_brightness": 50,
     "state_file": "/tmp/als-dimmer-state.json",
-    "auto_resume_timeout_sec": 60
+    "auto_resume_timeout_sec": 60,
+    "log_level": "debug"
   },
 
   "zones": [

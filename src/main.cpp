@@ -5,12 +5,12 @@
 #include "als-dimmer/zone_mapper.hpp"
 #include "als-dimmer/brightness_controller.hpp"
 #include "als-dimmer/logger.hpp"
+#include "als-dimmer/json_protocol.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <memory>
 #include <thread>
 #include <chrono>
-#include <sstream>
 #include <iomanip>
 
 using json = nlohmann::json;
@@ -91,130 +91,133 @@ std::string processCommand(const std::string& command,
                           std::chrono::steady_clock::time_point& manual_temp_start,
                           als_dimmer::ZoneMapper* zone_mapper) {
     (void)control;  // Reserved for future use (broadcasting status updates)
-    std::istringstream iss(command);
-    std::string cmd;
-    iss >> cmd;
 
-    if (cmd == "GET_STATUS") {
-        json j;
-        j["mode"] = als_dimmer::StateManager::modeToString(state_mgr.getMode());
-        j["lux"] = current_lux;
+    using namespace als_dimmer::protocol;
 
-        int target_brightness;
-        std::string zone_name;
-        if (zone_mapper) {
-            target_brightness = zone_mapper->mapLuxToBrightness(current_lux);
-            zone_name = zone_mapper->getCurrentZoneName(current_lux);
-        } else {
-            target_brightness = mapLuxToBrightnessSimple(current_lux);
-            zone_name = "simple";
+    // Check if this is a JSON command (starts with '{')
+    if (!command.empty() && command[0] == '{') {
+        try {
+            // Parse JSON command
+            ParsedCommand parsed_cmd = parseCommand(command);
+
+            // Process JSON command based on type
+            switch (parsed_cmd.type) {
+                case CommandType::GET_STATUS: {
+                    std::string zone_name;
+                    if (zone_mapper) {
+                        zone_name = zone_mapper->getCurrentZoneName(current_lux);
+                    } else {
+                        zone_name = "simple";
+                    }
+
+                    return generateStatusResponse(
+                        state_mgr.getMode() == als_dimmer::OperatingMode::AUTO,
+                        current_brightness,
+                        current_lux,
+                        zone_name
+                    );
+                }
+
+                case CommandType::SET_MODE: {
+                    if (!parsed_cmd.params.contains("mode")) {
+                        return generateErrorResponse("Missing 'mode' parameter", "INVALID_PARAMS");
+                    }
+
+                    std::string mode_str = parsed_cmd.params["mode"].get<std::string>();
+                    if (mode_str != "auto" && mode_str != "manual") {
+                        return generateErrorResponse("Mode must be 'auto' or 'manual'", "INVALID_PARAMS");
+                    }
+
+                    auto new_mode = als_dimmer::StateManager::stringToMode(mode_str);
+                    state_mgr.setMode(new_mode);
+                    LOG_INFO("main", "Mode set to: " << mode_str << " (JSON)");
+
+                    json data;
+                    data["mode"] = mode_str;
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                           "Mode set successfully", data);
+                }
+
+                case CommandType::SET_BRIGHTNESS: {
+                    if (!parsed_cmd.params.contains("brightness")) {
+                        return generateErrorResponse("Missing 'brightness' parameter", "INVALID_PARAMS");
+                    }
+
+                    int brightness = parsed_cmd.params["brightness"].get<int>();
+                    if (brightness < 0 || brightness > 100) {
+                        return generateErrorResponse("Brightness must be 0-100", "INVALID_PARAMS");
+                    }
+
+                    state_mgr.setManualBrightness(brightness);
+
+                    // If in AUTO mode, switch to MANUAL_TEMPORARY
+                    if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
+                        state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
+                        manual_temp_start = std::chrono::steady_clock::now();
+                        LOG_INFO("main", "Switched to MANUAL_TEMPORARY mode (JSON)");
+                    } else if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
+                        manual_temp_start = std::chrono::steady_clock::now();
+                    }
+
+                    json data;
+                    data["brightness"] = brightness;
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                           "Brightness set successfully", data);
+                }
+
+                case CommandType::ADJUST_BRIGHTNESS: {
+                    if (!parsed_cmd.params.contains("delta")) {
+                        return generateErrorResponse("Missing 'delta' parameter", "INVALID_PARAMS");
+                    }
+
+                    int delta = parsed_cmd.params["delta"].get<int>();
+                    int current = state_mgr.getManualBrightness();
+                    int new_brightness = std::max(0, std::min(100, current + delta));
+
+                    state_mgr.setManualBrightness(new_brightness);
+
+                    if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
+                        state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
+                        manual_temp_start = std::chrono::steady_clock::now();
+                    } else if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
+                        manual_temp_start = std::chrono::steady_clock::now();
+                    }
+
+                    json data;
+                    data["brightness"] = new_brightness;
+                    data["delta"] = delta;
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                           "Brightness adjusted successfully", data);
+                }
+
+                case CommandType::GET_CONFIG: {
+                    // Return current configuration
+                    json data;
+                    data["mode"] = als_dimmer::StateManager::modeToString(state_mgr.getMode());
+                    data["manual_brightness"] = state_mgr.getManualBrightness();
+                    data["last_auto_brightness"] = state_mgr.getLastAutoBrightness();
+                    return generateConfigResponse(data);
+                }
+
+                case CommandType::UNKNOWN:
+                default:
+                    return generateErrorResponse("Unknown command type", "UNKNOWN_COMMAND");
+            }
+
+        } catch (const json::parse_error& e) {
+            return generateErrorResponse(
+                std::string("JSON parse error: ") + e.what(), "PARSE_ERROR");
+        } catch (const std::exception& e) {
+            return generateErrorResponse(
+                std::string("Internal error: ") + e.what(), "INTERNAL_ERROR");
         }
-
-        j["target_brightness"] = target_brightness;
-        j["current_brightness"] = current_brightness;
-        j["zone"] = zone_name;
-        j["sensor_healthy"] = true;
-
-        // Calculate time until auto-resume
-        int resume_sec = 0;
-        if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - manual_temp_start).count();
-            resume_sec = std::max(0L, 60L - elapsed);
-        }
-        j["manual_resume_in_sec"] = resume_sec;
-        j["uptime_sec"] = 0;  // TODO
-
-        return "OK " + j.dump();
-
-    } else if (cmd == "GET_LUX") {
-        return "OK " + std::to_string(current_lux);
-
-    } else if (cmd == "GET_BRIGHTNESS") {
-        return "OK " + std::to_string(current_brightness);
-
-    } else if (cmd == "GET_MODE") {
-        return "OK " + als_dimmer::StateManager::modeToString(state_mgr.getMode());
-
-    } else if (cmd == "GET_STATE") {
-        json j;
-        j["mode"] = als_dimmer::StateManager::modeToString(state_mgr.getMode());
-        j["manual_brightness"] = state_mgr.getManualBrightness();
-        j["last_auto_brightness"] = state_mgr.getLastAutoBrightness();
-        return "OK " + j.dump();
-
-    } else if (cmd == "SET_BRIGHTNESS") {
-        int brightness;
-        if (!(iss >> brightness)) {
-            return "ERROR Invalid brightness value";
-        }
-
-        if (brightness < 0 || brightness > 100) {
-            return "ERROR Brightness must be 0-100";
-        }
-
-        state_mgr.setManualBrightness(brightness);
-
-        // If in AUTO mode, switch to MANUAL_TEMPORARY
-        if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
-            state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
-            manual_temp_start = std::chrono::steady_clock::now();
-            LOG_INFO("main", "Switched to MANUAL_TEMPORARY mode (user adjustment)");
-        } else if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
-            // Reset timer
-            manual_temp_start = std::chrono::steady_clock::now();
-            LOG_DEBUG("main", "Manual adjustment timer reset");
-        }
-
-        return "OK Brightness set to " + std::to_string(brightness);
-
-    } else if (cmd == "SET_MODE") {
-        std::string mode_str;
-        if (!(iss >> mode_str)) {
-            return "ERROR Missing mode parameter";
-        }
-
-        if (mode_str != "auto" && mode_str != "manual") {
-            return "ERROR Mode must be 'auto' or 'manual'";
-        }
-
-        auto new_mode = als_dimmer::StateManager::stringToMode(mode_str);
-        state_mgr.setMode(new_mode);
-
-        LOG_INFO("main", "Mode explicitly set to: " << mode_str);
-        return "OK Mode set to " + mode_str;
-
-    } else if (cmd == "SET_MANUAL_BRIGHTNESS") {
-        int brightness;
-        if (!(iss >> brightness)) {
-            return "ERROR Invalid brightness value";
-        }
-
-        if (brightness < 0 || brightness > 100) {
-            return "ERROR Brightness must be 0-100";
-        }
-
-        state_mgr.setManualBrightness(brightness);
-        state_mgr.setMode(als_dimmer::OperatingMode::MANUAL);
-
-        LOG_INFO("main", "Set to MANUAL mode at " << brightness << "%");
-        return "OK Manual brightness set to " + std::to_string(brightness);
-
-    } else if (cmd == "SAVE_STATE") {
-        if (state_mgr.save()) {
-            return "OK State saved";
-        } else {
-            return "ERROR Failed to save state";
-        }
-
-    } else if (cmd == "SHUTDOWN") {
-        LOG_INFO("main", "Shutdown requested via TCP");
-        state_mgr.save();
-        return "OK Shutting down";
-
-    } else {
-        return "ERROR Unknown command: " + cmd;
     }
+
+    // Non-JSON command - return error
+    return generateErrorResponse(
+        "Invalid command format. Only JSON protocol is supported. "
+        "Please send commands in JSON format starting with '{'",
+        "INVALID_FORMAT");
 }
 
 int main(int argc, char* argv[]) {
@@ -302,8 +305,8 @@ int main(int argc, char* argv[]) {
     }
     LOG_INFO("main", "Output initialized: " << output->getType());
 
-    // Initialize TCP control interface
-    als_dimmer::ControlInterface control(config.control.listen_address, config.control.listen_port);
+    // Initialize control interface (TCP and/or Unix sockets)
+    als_dimmer::ControlInterface control(config.control);
     if (!control.start()) {
         LOG_ERROR("main", "Failed to start control interface");
         return 1;
