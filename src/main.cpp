@@ -110,8 +110,23 @@ std::string processCommand(const std::string& command,
                         zone_name = "simple";
                     }
 
+                    // Convert internal OperatingMode to string for status response
+                    std::string mode_str;
+                    als_dimmer::OperatingMode current_mode = state_mgr.getMode();
+                    switch (current_mode) {
+                        case als_dimmer::OperatingMode::AUTO:
+                            mode_str = "auto";
+                            break;
+                        case als_dimmer::OperatingMode::MANUAL:
+                            mode_str = "manual";
+                            break;
+                        case als_dimmer::OperatingMode::MANUAL_TEMPORARY:
+                            mode_str = "manual_temporary";
+                            break;
+                    }
+
                     return generateStatusResponse(
-                        state_mgr.getMode() == als_dimmer::OperatingMode::AUTO,
+                        mode_str,
                         current_brightness,
                         current_lux,
                         zone_name

@@ -59,6 +59,17 @@ target_compile_options(als-dimmer PRIVATE
     -Wall -Wextra -Wpedantic -Werror
 )
 
+# ============================================================================
+# Client utility executable
+# ============================================================================
+
+add_executable(als-dimmer-client tools/als-dimmer-client.cpp)
+
+# Compiler warnings
+target_compile_options(als-dimmer-client PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+)
+
 # Configure systemd service file with CMAKE_INSTALL_PREFIX
 if(INSTALL_SYSTEMD_SERVICE)
     configure_file(
@@ -69,7 +80,7 @@ if(INSTALL_SYSTEMD_SERVICE)
 endif()
 
 # Install rules
-install(TARGETS als-dimmer DESTINATION bin)
+install(TARGETS als-dimmer als-dimmer-client DESTINATION bin)
 
 # Install all config files to PREFIX/etc/als-dimmer/
 file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/configs/*.json")

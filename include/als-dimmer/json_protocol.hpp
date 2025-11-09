@@ -51,7 +51,7 @@ std::string generateResponse(ResponseStatus status,
                             const json& data = json::object());
 
 // Generate status response (for GET_STATUS command)
-std::string generateStatusResponse(bool auto_mode,
+std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
                                    const std::string& current_zone);

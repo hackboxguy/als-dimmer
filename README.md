@@ -1,6 +1,6 @@
 # ALS-Dimmer
 
-Ambient Light Sensor Based Display Brightness Control for automotive and embedded systems.
+Ambient Light Sensor Based Display Brightness Control daemon.
 
 ## Quick Start on Raspberry Pi 4
 
@@ -25,14 +25,51 @@ sudo raspi-config
 cd ~/als-dimmer
 mkdir -p build && cd build
 
-# Option 1: With DDC/CI support (for monitors)
+# Basic build (no DDC/CI support)
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# With DDC/CI support for monitors
 cmake -DUSE_DDCUTIL=ON -DCMAKE_BUILD_TYPE=Release ..
 
-# Option 2: Without DDC/CI (faster compilation)
-cmake -DUSE_DDCUTIL=OFF -DCMAKE_BUILD_TYPE=Release ..
+# With systemd service installation
+cmake -DUSE_DDCUTIL=ON \
+      -DINSTALL_SYSTEMD_SERVICE=ON \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_BUILD_TYPE=Release ..
 
 # Compile
 make -j4
+
+# Install (optional, for systemd service)
+sudo make install
+```
+
+**CMake Configuration Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `USE_DDCUTIL` | OFF | Enable DDC/CI monitor support via libddcutil |
+| `INSTALL_SYSTEMD_SERVICE` | OFF | Install systemd service file |
+| `CONFIG_FILE` | config_opti4001_ddcutil.json | Default config file to use |
+| `CMAKE_INSTALL_PREFIX` | /usr/local | Installation directory prefix |
+| `CMAKE_BUILD_TYPE` | Release | Build type (Release, Debug, RelWithDebInfo) |
+
+**Examples:**
+
+```bash
+# Development build with debug symbols
+cmake -DUSE_DDCUTIL=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+
+# Production install with systemd and custom config
+cmake -DUSE_DDCUTIL=ON \
+      -DINSTALL_SYSTEMD_SERVICE=ON \
+      -DCONFIG_FILE=config_fpga_opti4001_dimmer200.json \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_BUILD_TYPE=Release ..
+make -j4
+sudo make install
+sudo systemctl enable als-dimmer
+sudo systemctl start als-dimmer
 ```
 
 ### Verify Hardware
@@ -61,30 +98,80 @@ ddcutil getvcp 10  # Get current brightness
 ./als-dimmer --config ../configs/config_simulation.json --foreground
 ```
 
-### Test TCP Control
+### Control the Daemon
+
+#### Using the Client Utility
+
+The `als-dimmer-client` provides a convenient command-line interface for controlling the daemon:
 
 ```bash
-# In another terminal, test commands:
+# Get daemon status (mode, brightness, lux, zone)
+./als-dimmer-client --status
+
+# Get current brightness
+./als-dimmer-client --brightness
+
+# Set brightness to 75%
+./als-dimmer-client --brightness=75
+
+# Adjust brightness by +10%
+./als-dimmer-client --adjust=10
 
 # Get current mode
-echo "GET_MODE" | nc localhost 9000
+./als-dimmer-client --mode
 
-# Get full status
-printf "GET_STATUS\n" | nc -w 1 localhost 9000
+# Switch to manual mode
+./als-dimmer-client --mode=manual
+
+# Switch to auto mode
+./als-dimmer-client --mode=auto
+
+# Connect via Unix socket (lower latency)
+./als-dimmer-client --use-unix-socket --status
+
+# Connect to remote daemon
+./als-dimmer-client --ip=192.168.1.100 --port=9000 --status
+
+# Get raw JSON response
+./als-dimmer-client --status --json
+```
+
+#### Using the JSON Protocol Directly
+
+The daemon supports both TCP and Unix domain sockets with a JSON-based protocol:
+
+```bash
+# Get full status (mode, brightness, lux, zone)
+printf '{"version":"1.0","command":"get_status"}' | nc -w 1 localhost 9000
+
+# Response:
+# {"version":"1.0","status":"success","message":"Status retrieved successfully","data":{"mode":"auto","brightness":75,"lux":450.5,"zone":"indoor"}}
+
+# Get configuration
+printf '{"version":"1.0","command":"get_config"}' | nc -w 1 localhost 9000
 
 # Manual brightness adjustment (auto-resumes after 60 seconds)
-printf "SET_BRIGHTNESS 75\n" | nc -w 1 localhost 9000
+printf '{"version":"1.0","command":"set_brightness","params":{"brightness":75}}' | nc -w 1 localhost 9000
+
+# Adjust brightness by delta
+printf '{"version":"1.0","command":"adjust_brightness","params":{"delta":10}}' | nc -w 1 localhost 9000
 
 # Switch to sticky manual mode
-printf "SET_MODE manual\n" | nc -w 1 localhost 9000
-printf "SET_BRIGHTNESS 50\n" | nc -w 1 localhost 9000
+printf '{"version":"1.0","command":"set_mode","params":{"mode":"manual"}}' | nc -w 1 localhost 9000
 
 # Resume automatic control
-printf "SET_MODE auto\n" | nc -w 1 localhost 9000
+printf '{"version":"1.0","command":"set_mode","params":{"mode":"auto"}}' | nc -w 1 localhost 9000
 
-# Shutdown gracefully
-printf "SHUTDOWN\n" | nc -w 1 localhost 9000
+# Test via Unix socket (same commands, lower latency)
+printf '{"version":"1.0","command":"get_status"}' | nc -w 1 -U /tmp/als-dimmer.sock
 ```
+
+**Available Commands:**
+- `get_status` - Get system status (mode, brightness, lux, zone)
+- `get_config` - Get configuration (mode, manual_brightness, last_auto_brightness)
+- `set_mode` - Set operating mode (`"auto"` or `"manual"`)
+- `set_brightness` - Set brightness (0-100, triggers MANUAL_TEMPORARY in AUTO mode)
+- `adjust_brightness` - Adjust brightness by delta value (-100 to +100)
 
 ## Operating Modes
 
@@ -133,6 +220,33 @@ sudo ddcutil getvcp 10
 # If works with sudo, add user to i2c group
 sudo usermod -a -G i2c $USER
 ```
+
+### Systemd Service NAMESPACE Error (226)
+
+If the systemd service fails with `status=226/NAMESPACE`, the security directives may be too restrictive for your system:
+
+```bash
+# Verify the generated service file content
+cat /path/to/install/lib/systemd/system/als-dimmer.service
+
+# Check if ProtectSystem, DevicePolicy are commented out
+grep -E "^(ProtectSystem|DevicePolicy|DeviceAllow)" /path/to/install/lib/systemd/system/als-dimmer.service
+
+# If the directives are still active (not commented), rebuild with clean CMake cache:
+cd ~/als-dimmer
+rm -rf build
+mkdir build && cd build
+cmake -DUSE_DDCUTIL=ON -DINSTALL_SYSTEMD_SERVICE=ON -DCMAKE_INSTALL_PREFIX=/usr ..
+make -j4
+sudo make install
+sudo systemctl daemon-reload
+sudo systemctl restart als-dimmer
+
+# Check journalctl for detailed error messages
+sudo journalctl -u als-dimmer.service -n 50 --no-pager
+```
+
+**Note**: The service file has all security directives commented out by default for maximum compatibility with various systemd versions and kernel configurations. On Raspberry Pi OS and similar systems, even basic directives like `NoNewPrivileges=true` can cause NAMESPACE errors. Once the service is running successfully, you can gradually uncomment security directives in the service file to find which ones your system supports.
 
 ## Documentation
 

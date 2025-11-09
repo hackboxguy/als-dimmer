@@ -444,9 +444,23 @@ std::string ControlInterface::processJsonCommand(const std::string& json_command
         switch (cmd.type) {
             case protocol::CommandType::GET_STATUS: {
                 std::lock_guard<std::mutex> lock(status_mutex_);
-                std::string mode_str = (status_.mode == OperatingMode::AUTO) ? "auto" : "manual";
+
+                // Convert internal OperatingMode to string for status response
+                std::string mode_str;
+                switch (status_.mode) {
+                    case OperatingMode::AUTO:
+                        mode_str = "auto";
+                        break;
+                    case OperatingMode::MANUAL:
+                        mode_str = "manual";
+                        break;
+                    case OperatingMode::MANUAL_TEMPORARY:
+                        mode_str = "manual_temporary";
+                        break;
+                }
+
                 return protocol::generateStatusResponse(
-                    status_.mode == OperatingMode::AUTO,
+                    mode_str,
                     status_.current_brightness,
                     status_.lux,
                     status_.zone

@@ -65,12 +65,12 @@ std::string generateResponse(ResponseStatus status,
     return response.dump();
 }
 
-std::string generateStatusResponse(bool auto_mode,
+std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
                                    const std::string& current_zone) {
     json data;
-    data["mode"] = auto_mode ? "auto" : "manual";
+    data["mode"] = mode;  // Now accepts: "auto", "manual", or "manual_temporary"
     data["brightness"] = current_brightness;
     data["lux"] = current_lux;
     data["zone"] = current_zone;
