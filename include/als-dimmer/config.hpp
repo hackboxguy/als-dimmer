@@ -10,14 +10,15 @@ namespace als_dimmer {
 // Configuration structures matching JSON schema
 
 struct SensorConfig {
-    std::string type;           // opti4001 | veml7700 | can | custom_i2c | file
+    std::string type;           // opti4001 | veml7700 | can_als | fpga_opti4001 | custom_i2c | file
     std::string device;         // For I2C sensors
     std::string address;        // For I2C sensors (hex string)
     std::string file_path;      // For file sensor
 
-    // CAN-specific fields (Phase 3)
-    std::string can_interface;
-    std::string can_id;
+    // CAN-specific fields
+    std::string can_interface;  // e.g., "can0"
+    std::string can_id;         // e.g., "0x0A2"
+    int timeout_ms = 5000;      // Timeout for considering data stale
 };
 
 struct OutputConfig {

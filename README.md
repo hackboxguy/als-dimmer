@@ -9,7 +9,7 @@ Ambient Light Sensor Based Display Brightness Control daemon.
 ```bash
 # Install build dependencies
 sudo apt-get update
-sudo apt-get install -y build-essential cmake pkg-config
+sudo apt-get install -y git build-essential cmake pkg-config
 sudo apt-get install -y libi2c-dev i2c-tools
 sudo apt-get install -y libddcutil-dev  # For DDC/CI monitor support
 
@@ -22,9 +22,14 @@ sudo raspi-config
 ### Build
 
 ```bash
+git clone https://github.com/hackboxguy/als-dimmer.git
 cd ~/als-dimmer
-mkdir -p build && cd build
-
+cmake -H. -BOutput -DUSE_DDCUTIL=ON -DINSTALL_SYSTEMD_SERVICE=ON -DCONFIG_FILE=config_opti4001_ddcutil.json -DCMAKE_INSTALL_PREFIX=/home/pi/als-dimmer-install/
+cmake --build Output -- install -j$(nproc)
+sudo systemctl enable /home/pi/als-dimmer-install/lib/systemd/system/als-dimmer.service
+sudo systemctl restart als-dimmer.service
+ ~/als-dimmer-install/bin/als-dimmer-client --status
+ 
 # Basic build (no DDC/CI support)
 cmake -DCMAKE_BUILD_TYPE=Release ..
 
@@ -38,7 +43,7 @@ cmake -DUSE_DDCUTIL=ON \
       -DCMAKE_BUILD_TYPE=Release ..
 
 # Compile
-make -j4
+make -j$(nproc)
 
 # Install (optional, for systemd service)
 sudo make install
@@ -94,6 +99,10 @@ ddcutil getvcp 10  # Get current brightness
 # Run with OPTI4001 sensor and DDC/CI monitor
 ./als-dimmer --config ../configs/config_opti4001_ddcutil.json --foreground
 
+# Run with CAN ALS sensor (requires SocketCAN setup)
+sudo ip link set up can0 type can bitrate 500000
+./als-dimmer --config ../configs/config_can_als_file.json --foreground
+
 # Run in simulation mode (for testing without hardware)
 ./als-dimmer --config ../configs/config_simulation.json --foreground
 ```
@@ -144,8 +153,14 @@ The daemon supports both TCP and Unix domain sockets with a JSON-based protocol:
 # Get full status (mode, brightness, lux, zone)
 printf '{"version":"1.0","command":"get_status"}' | nc -w 1 localhost 9000
 
-# Response:
+# Response (in AUTO mode):
 # {"version":"1.0","status":"success","message":"Status retrieved successfully","data":{"mode":"auto","brightness":75,"lux":450.5,"zone":"indoor"}}
+
+# Response (in MANUAL_TEMPORARY mode, after setting brightness in AUTO):
+# {"version":"1.0","status":"success","message":"Status retrieved successfully","data":{"mode":"manual_temporary","brightness":80,"lux":450.5,"zone":"indoor"}}
+
+# Response (in MANUAL mode, after explicit mode change):
+# {"version":"1.0","status":"success","message":"Status retrieved successfully","data":{"mode":"manual","brightness":50,"lux":450.5,"zone":"indoor"}}
 
 # Get configuration
 printf '{"version":"1.0","command":"get_config"}' | nc -w 1 localhost 9000
@@ -175,14 +190,23 @@ printf '{"version":"1.0","command":"get_status"}' | nc -w 1 -U /tmp/als-dimmer.s
 
 ## Operating Modes
 
-- **AUTO**: Continuous sensor reading → automatic brightness adjustment
-- **MANUAL**: Sticky manual brightness (persists across restarts)
-- **MANUAL_TEMPORARY**: Manual adjustment with 60-second auto-resume to AUTO mode
+The daemon supports three operating modes with seamless transitions:
+
+- **AUTO**: Continuous sensor reading → automatic brightness adjustment based on ambient light
+- **MANUAL**: Persistent manual brightness (survives daemon restarts)
+- **MANUAL_TEMPORARY**: Temporary manual override with automatic return to AUTO mode after timeout (default: 60 seconds)
+
+**Mode Behavior:**
+- Setting brightness while in AUTO mode → Switches to MANUAL_TEMPORARY (allows quick adjustments without permanent mode change)
+- Explicitly setting mode to "manual" → Switches to persistent MANUAL mode
+- MANUAL_TEMPORARY timeout expires → Automatically returns to AUTO mode
+- Status response exposes all three modes including the transitional `manual_temporary` state
 
 ## Configuration
 
 See `configs/` directory for sample configurations:
 - `config_opti4001_ddcutil.json` - OPTI4001 sensor + DDC/CI monitor
+- `config_can_als_file.json` - CAN ALS sensor + file output (for testing)
 - `config_simulation.json` - File-based simulation for testing
 
 ## Troubleshooting

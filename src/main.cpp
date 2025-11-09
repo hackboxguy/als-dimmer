@@ -6,6 +6,7 @@
 #include "als-dimmer/brightness_controller.hpp"
 #include "als-dimmer/logger.hpp"
 #include "als-dimmer/json_protocol.hpp"
+#include "als-dimmer/sensors/can_als_sensor.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <memory>
@@ -40,6 +41,14 @@ std::unique_ptr<als_dimmer::SensorInterface> createSensor(const als_dimmer::Conf
         return als_dimmer::createOPTI4001Sensor(config.sensor.device, config.sensor.address);
     } else if (config.sensor.type == "fpga_opti4001") {
         return als_dimmer::createFPGAOpti4001Sensor(config.sensor.device, config.sensor.address);
+    } else if (config.sensor.type == "can_als") {
+        // Parse CAN ID from hex string (e.g., "0x0A2" -> 0x0A2)
+        uint32_t can_id = static_cast<uint32_t>(std::stoul(config.sensor.can_id, nullptr, 16));
+        return std::make_unique<als_dimmer::CANALSSensor>(
+            config.sensor.can_interface,
+            can_id,
+            config.sensor.timeout_ms
+        );
     }
     LOG_ERROR("factory", "Unsupported sensor type: " << config.sensor.type);
     return nullptr;

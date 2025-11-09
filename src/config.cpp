@@ -49,6 +49,9 @@ Config Config::loadFromFile(const std::string& filename) {
     if (sensor_json.contains("can_id")) {
         config.sensor.can_id = sensor_json["can_id"].get<std::string>();
     }
+    if (sensor_json.contains("timeout_ms")) {
+        config.sensor.timeout_ms = sensor_json["timeout_ms"].get<int>();
+    }
 
     // Parse output configuration
     if (!j.contains("output")) {
@@ -252,7 +255,7 @@ void Config::validate() const {
         if (sensor.file_path.empty()) {
             throw ConfigError("sensor.file_path is required for file sensor type");
         }
-    } else if (sensor.type == "can") {
+    } else if (sensor.type == "can_als") {
         if (sensor.can_interface.empty()) {
             throw ConfigError("sensor.can_interface is required for CAN sensor type");
         }
