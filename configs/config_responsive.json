@@ -1,0 +1,80 @@
+{
+  "sensor": {
+    "type": "opti4001",
+    "device": "/dev/i2c-1",
+    "address": "0x44"
+  },
+
+  "output": {
+    "type": "ddcutil",
+    "device": "/dev/i2c-1",
+    "display_number": 0
+  },
+
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0660",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 100,
+    "hysteresis_percent": 1.5,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/tmp/als-dimmer-state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info"
+  },
+
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 10],
+      "brightness_range": [5, 30],
+      "curve": "logarithmic",
+      "step_sizes": {
+        "large_up": 8, "large_down": 5,
+        "medium_up": 4, "medium_down": 2,
+        "small_up": 2, "small_down": 1
+      },
+      "error_thresholds": {"large": 15, "small": 5}
+    },
+    {
+      "name": "indoor",
+      "lux_range": [10, 500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": {
+        "large_up": 12, "large_down": 6,
+        "medium_up": 6, "medium_down": 3,
+        "small_up": 2, "small_down": 1
+      },
+      "error_thresholds": {"large": 20, "small": 6}
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": {
+        "large_up": 15, "large_down": 8,
+        "medium_up": 8, "medium_down": 4,
+        "small_up": 3, "small_down": 2
+      },
+      "error_thresholds": {"large": 20, "small": 8}
+    }
+  ],
+
+  "calibration": {
+    "enabled": false,
+    "sample_duration_sec": 60,
+    "auto_adjust_zones": true
+  }
+}
