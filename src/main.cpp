@@ -4,6 +4,7 @@
 #include "als-dimmer/control_interface.hpp"
 #include "als-dimmer/zone_mapper.hpp"
 #include "als-dimmer/brightness_controller.hpp"
+#include "als-dimmer/csv_logger.hpp"
 #include "als-dimmer/logger.hpp"
 #include "als-dimmer/json_protocol.hpp"
 #include "als-dimmer/sensors/can_als_sensor.hpp"
@@ -85,10 +86,12 @@ void printUsage(const char* program_name) {
     std::cout << "  --config <path>      Path to JSON config file (required)\n";
     std::cout << "  --log-level <level>  Set log level: trace, debug, info, warn, error (default: info)\n";
     std::cout << "  --foreground         Don't daemonize, log to console\n";
+    std::cout << "  --csvlog <path>      Enable CSV logging to specified file\n";
     std::cout << "  --help               Show this help message\n";
     std::cout << "\nEXAMPLE:\n";
     std::cout << "  " << program_name << " --config configs/config_simulation.json --foreground\n";
     std::cout << "  " << program_name << " --config configs/config_simulation.json --log-level debug\n";
+    std::cout << "  " << program_name << " --config configs/config.json --csvlog /tmp/data.csv --foreground\n";
 }
 
 // Process TCP commands
@@ -247,6 +250,7 @@ std::string processCommand(const std::string& command,
 int main(int argc, char* argv[]) {
     std::string config_file;
     std::string log_level_override;
+    std::string csv_file;
     bool foreground = false;
     (void)foreground;
 
@@ -257,6 +261,8 @@ int main(int argc, char* argv[]) {
             config_file = argv[++i];
         } else if (arg == "--log-level" && i + 1 < argc) {
             log_level_override = argv[++i];
+        } else if (arg == "--csvlog" && i + 1 < argc) {
+            csv_file = argv[++i];
         } else if (arg == "--foreground") {
             foreground = true;
         } else if (arg == "--help") {
@@ -338,6 +344,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Initialize CSV logger if requested
+    std::unique_ptr<als_dimmer::CSVLogger> csv_logger;
+    if (!csv_file.empty()) {
+        csv_logger = std::make_unique<als_dimmer::CSVLogger>(csv_file);
+        if (!csv_logger->isOpen()) {
+            LOG_ERROR("main", "Failed to open CSV log file, continuing without CSV logging");
+            csv_logger.reset();
+        } else {
+            LOG_INFO("main", "CSV logging enabled to: " << csv_file);
+        }
+    }
+
     // Restore initial brightness based on saved state
     if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL) {
         output->setBrightness(state_mgr.getManualBrightness());
@@ -358,6 +376,12 @@ int main(int argc, char* argv[]) {
     auto manual_temp_start = std::chrono::steady_clock::now();
     float current_lux = 0.0f;
     bool should_exit = false;
+
+    // CSV logging state tracking
+    uint64_t iteration_seq = 0;
+    int previous_brightness = output->getCurrentBrightness();
+    std::string previous_zone_name = "";
+    auto csv_start_time = std::chrono::steady_clock::now();
 
     while (!should_exit) {
         // Process TCP commands
@@ -394,43 +418,113 @@ int main(int argc, char* argv[]) {
                 // Map lux to brightness using zone mapper (or simple mapping as fallback)
                 int target_brightness;
                 const als_dimmer::Zone* current_zone = nullptr;
+                std::string current_zone_name;
+                std::string curve_type;
 
                 if (zone_mapper) {
                     target_brightness = zone_mapper->mapLuxToBrightness(current_lux);
                     current_zone = zone_mapper->selectZone(current_lux);
+                    current_zone_name = zone_mapper->getCurrentZoneName(current_lux);
+                    curve_type = current_zone ? current_zone->curve : "unknown";
                 } else {
                     target_brightness = mapLuxToBrightnessSimple(current_lux);
+                    current_zone_name = "simple";
+                    curve_type = "linear";
                 }
 
-                // Calculate smooth brightness transition
+                // Calculate smooth brightness transition with diagnostics
                 int current_brightness = output->getCurrentBrightness();
-                int next_brightness = brightness_ctrl.calculateNextBrightness(
+                auto transition_info = brightness_ctrl.calculateNextBrightnessWithInfo(
                     target_brightness, current_brightness, current_zone);
 
                 // Apply brightness
-                output->setBrightness(next_brightness);
-                state_mgr.setLastAutoBrightness(next_brightness);
+                output->setBrightness(transition_info.next_brightness);
+                state_mgr.setLastAutoBrightness(transition_info.next_brightness);
+
+                // CSV logging (AUTO mode)
+                if (csv_logger) {
+                    auto now = std::chrono::steady_clock::now();
+                    double timestamp = std::chrono::duration<double>(now - csv_start_time).count();
+                    bool zone_changed = (current_zone_name != previous_zone_name);
+
+                    als_dimmer::CSVLogger::IterationData log_data;
+                    log_data.timestamp = timestamp;
+                    log_data.seq = iteration_seq;
+                    log_data.lux = current_lux;
+                    log_data.sensor_healthy = sensor->isHealthy();
+                    log_data.zone_name = current_zone_name;
+                    log_data.zone_changed = zone_changed;
+                    log_data.curve = curve_type;
+                    log_data.target_brightness = target_brightness;
+                    log_data.current_brightness = current_brightness;
+                    log_data.previous_brightness = previous_brightness;
+                    log_data.brightness_change = transition_info.next_brightness - previous_brightness;
+                    log_data.error = transition_info.error;
+                    log_data.step_category = transition_info.step_category;
+                    log_data.step_size = transition_info.step_size;
+                    log_data.step_threshold_large = transition_info.step_threshold_large;
+                    log_data.step_threshold_small = transition_info.step_threshold_small;
+                    log_data.mode = "AUTO";
+
+                    csv_logger->logIteration(log_data);
+
+                    previous_zone_name = current_zone_name;
+                }
+
+                previous_brightness = transition_info.next_brightness;
 
                 // Log with zone name and transition info if available
                 if (zone_mapper) {
                     LOG_TRACE("main", "AUTO: Lux=" << current_lux
-                              << " Zone=" << zone_mapper->getCurrentZoneName(current_lux)
+                              << " Zone=" << current_zone_name
                               << " Target=" << target_brightness << "%"
                               << " Current=" << current_brightness << "%"
-                              << " Next=" << next_brightness << "%");
+                              << " Next=" << transition_info.next_brightness << "%");
                 } else {
                     LOG_TRACE("main", "AUTO: Lux=" << current_lux
                               << " Target=" << target_brightness << "%"
-                              << " Next=" << next_brightness << "%");
+                              << " Next=" << transition_info.next_brightness << "%");
                 }
             }
+            iteration_seq++;
         } else {
             // MANUAL or MANUAL_TEMPORARY: use manual brightness
             int manual_brightness = state_mgr.getManualBrightness();
+            int current_brightness_before = output->getCurrentBrightness();
             output->setBrightness(manual_brightness);
 
             std::string mode_str = als_dimmer::StateManager::modeToString(state_mgr.getMode());
             LOG_DEBUG("main", mode_str << ": Brightness=" << manual_brightness << "%");
+
+            // CSV logging (MANUAL mode)
+            if (csv_logger) {
+                auto now = std::chrono::steady_clock::now();
+                double timestamp = std::chrono::duration<double>(now - csv_start_time).count();
+
+                als_dimmer::CSVLogger::IterationData log_data;
+                log_data.timestamp = timestamp;
+                log_data.seq = iteration_seq;
+                log_data.lux = current_lux;  // May be stale in manual mode
+                log_data.sensor_healthy = sensor->isHealthy();
+                log_data.zone_name = "manual";
+                log_data.zone_changed = false;
+                log_data.curve = "manual";
+                log_data.target_brightness = manual_brightness;
+                log_data.current_brightness = current_brightness_before;
+                log_data.previous_brightness = previous_brightness;
+                log_data.brightness_change = manual_brightness - previous_brightness;
+                log_data.error = 0;  // No error in manual mode
+                log_data.step_category = "manual";
+                log_data.step_size = 0;
+                log_data.step_threshold_large = 0;
+                log_data.step_threshold_small = 0;
+                log_data.mode = mode_str;
+
+                csv_logger->logIteration(log_data);
+            }
+
+            previous_brightness = manual_brightness;
+            iteration_seq++;
         }
 
         // Periodic state save (every 60 seconds if dirty)

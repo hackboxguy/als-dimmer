@@ -2,6 +2,7 @@
 #define ALS_DIMMER_BRIGHTNESS_CONTROLLER_HPP
 
 #include "config.hpp"
+#include <string>
 
 namespace als_dimmer {
 
@@ -17,6 +18,18 @@ namespace als_dimmer {
  */
 class BrightnessController {
 public:
+    /**
+     * Diagnostic information about a brightness transition
+     */
+    struct TransitionInfo {
+        int error;                  // target - current
+        int step_size;              // step value used
+        std::string step_category;  // "large_up", "medium_down", "small_up", etc.
+        int step_threshold_large;   // large error threshold
+        int step_threshold_small;   // small error threshold
+        int next_brightness;        // calculated next value
+    };
+
     BrightnessController();
 
     /**
@@ -30,6 +43,18 @@ public:
     int calculateNextBrightness(int target_brightness,
                                 int current_brightness,
                                 const Zone* zone) const;
+
+    /**
+     * Calculate next brightness with diagnostic information
+     *
+     * @param target_brightness Desired brightness (0-100)
+     * @param current_brightness Current brightness (0-100)
+     * @param zone Current zone (for step sizes and thresholds), nullptr for simple mode
+     * @return Transition info with next brightness and diagnostics
+     */
+    TransitionInfo calculateNextBrightnessWithInfo(int target_brightness,
+                                                    int current_brightness,
+                                                    const Zone* zone) const;
 
 private:
     /**

@@ -37,6 +37,79 @@ int BrightnessController::calculateNextBrightness(int target_brightness,
     return std::max(0, std::min(100, next_brightness));
 }
 
+BrightnessController::TransitionInfo BrightnessController::calculateNextBrightnessWithInfo(
+    int target_brightness,
+    int current_brightness,
+    const Zone* zone) const {
+
+    TransitionInfo info;
+    info.error = target_brightness - current_brightness;
+
+    // Get thresholds and step sizes
+    int abs_error = std::abs(info.error);
+    bool brightening = (info.error > 0);
+
+    // Get thresholds from zone or use defaults
+    if (zone) {
+        info.step_threshold_large = zone->error_thresholds.large;
+        info.step_threshold_small = zone->error_thresholds.small;
+    } else {
+        info.step_threshold_large = DEFAULT_THRESHOLD_LARGE;
+        info.step_threshold_small = DEFAULT_THRESHOLD_SMALL;
+    }
+
+    // Get step sizes
+    int step_large, step_medium, step_small;
+    if (zone) {
+        if (brightening) {
+            step_large = zone->step_sizes.large_up;
+            step_medium = zone->step_sizes.medium_up;
+            step_small = zone->step_sizes.small_up;
+        } else {
+            step_large = zone->step_sizes.large_down;
+            step_medium = zone->step_sizes.medium_down;
+            step_small = zone->step_sizes.small_down;
+        }
+    } else {
+        if (brightening) {
+            step_large = DEFAULT_STEP_LARGE;
+            step_medium = DEFAULT_STEP_MEDIUM;
+            step_small = DEFAULT_STEP_SMALL;
+        } else {
+            step_large = DEFAULT_STEP_LARGE / 2;
+            step_medium = DEFAULT_STEP_MEDIUM / 2;
+            step_small = DEFAULT_STEP_SMALL;
+        }
+    }
+
+    // Determine step size and category
+    if (info.error == 0) {
+        info.step_size = 0;
+        info.step_category = "none";
+    } else if (abs_error > info.step_threshold_large) {
+        info.step_size = step_large;
+        info.step_category = brightening ? "large_up" : "large_down";
+    } else if (abs_error > info.step_threshold_small) {
+        info.step_size = step_medium;
+        info.step_category = brightening ? "medium_up" : "medium_down";
+    } else {
+        info.step_size = step_small;
+        info.step_category = brightening ? "small_up" : "small_down";
+    }
+
+    // Calculate next brightness
+    if (std::abs(info.error) <= info.step_size) {
+        info.next_brightness = target_brightness;
+    } else {
+        info.next_brightness = current_brightness + (info.error > 0 ? info.step_size : -info.step_size);
+    }
+
+    // Clamp to valid range
+    info.next_brightness = std::max(0, std::min(100, info.next_brightness));
+
+    return info;
+}
+
 int BrightnessController::getStepSize(int error, const Zone* zone) const {
     int abs_error = std::abs(error);
     bool brightening = (error > 0);

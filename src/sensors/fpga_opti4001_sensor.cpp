@@ -122,9 +122,10 @@ public:
                       << " -> Lux: " << lux << "\n";
         }
 
-        // Sanity check (max ~10.7M lux for 24-bit value)
-        // OPT4001 max is ~83k lux for PicoStar variant, so 100k is reasonable upper limit
-        if (lux > 100000.0f) {
+        // Sanity check (max ~117.4k lux for SOT-5X3 variant)
+        // Max = (2^20 - 1) * 2^8 * 437.5e-6 = 118,362 lux theoretical
+        // FPGA raw max = 117,441 / 0.64 = 183,501, allowing 120k lux for margin
+        if (lux > 120000.0f) {
             std::cerr << "[FPGA_OPT4001] WARNING: lux out of expected range: " << lux << "\n";
             // Don't fail, just warn - might be valid in extreme conditions
         }

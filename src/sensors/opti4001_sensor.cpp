@@ -67,14 +67,15 @@ public:
 
         // Configure sensor (Register 0x0A - Configuration register)
         // Bit [15]: QWAKE = 0 (normal operation)
-        // Bit [14]: Reserved = 0
-        // Bits[13:10]: RANGE = 0xC (auto-range, value 12)
-        // Bits[9:6]: CONVERSION_TIME = 0x8 (100ms)
+        // Bit [14]: Reserved = 0 (MUST BE 0 per datasheet!)
+        // Bits[13:10]: RANGE = 0xC (auto-range, hardware manages exponent 0-11 automatically)
+        // Bits[9:6]: CONVERSION_TIME = 0x8 (100ms per datasheet - value 11=800ms, but ESP32 uses 8=100ms)
         // Bits[5:4]: OPERATING_MODE = 0x3 (continuous)
-        // Bit [3]: LATCH = 0 (transparent mode)
+        // Bit [3]: LATCH = 1 (latch interrupts)
         // Bit [2]: INT_POL = 0 (active low)
-        // Bits[1:0]: FAULT_COUNT = 0x0 (one fault count)
-        uint16_t config = 0xC830;  // Auto-range, 100ms conversion, continuous mode
+        // Bits[1:0]: FAULT_COUNT = 0x1 (one fault)
+        // Calculated: (0xC<<10) | (0x8<<6) | (0x3<<4) | (1<<3) | (0<<2) | 1 = 0x3239
+        uint16_t config = 0x3239;  // Match working ESP32 config exactly
 
         if (!writeRegister16(0x0A, config)) {
             std::cerr << "[OPTI4001]  Failed to configure sensor\n";
@@ -83,9 +84,22 @@ public:
             return false;
         }
 
-        std::cout << "[OPTI4001]  Sensor configured (continuous mode, auto-range)\n";
+        // Verify configuration was applied (readback register 0x0A)
+        uint16_t readback_config = 0;
+        if (!readRegister16(0x0A, readback_config)) {
+            std::cerr << "[OPTI4001]  WARNING: Failed to read back configuration\n";
+        } else {
+            std::cout << "[OPTI4001]  Config written: 0x" << std::hex << config
+                      << " readback: 0x" << readback_config << std::dec << "\n";
+            if (readback_config != config) {
+                std::cerr << "[OPTI4001]  WARNING: Configuration mismatch!\n";
+            }
+        }
+
+        std::cout << "[OPTI4001]  Sensor configured (continuous mode, auto-range, 100ms conversion)\n";
 
         // Wait for first conversion (100ms + margin)
+        // CRITICAL: Must wait full conversion time or auto-range won't initialize properly!
         usleep(150000);  // 150ms
 
         healthy_ = true;
@@ -126,14 +140,20 @@ public:
         // MANTISSA = (RESULT_MSB << 8) + RESULT_LSB
         uint32_t mantissa = ((uint32_t)result_msb << 8) | result_lsb;
 
-        // Debug output
+        // Debug output and saturation detection
         static int debug_count = 0;
-        if (debug_count++ < 10) {
+        bool mantissa_saturated = (mantissa >= 0xFFF00);  // Near max (20-bit = 0xFFFFF)
+        bool exponent_low = (exponent <= 3);  // Stuck at low exponent
+
+        if (debug_count++ < 10 || (mantissa_saturated && exponent_low)) {
             std::cout << "[OPTI4001]  Raw: LSB=0x" << std::hex << result_lsb
                       << " MSB=0x" << result_msb
                       << " EXP=0x" << (int)exponent
-                      << " CFG=0x" << (int)counter << std::dec << "\n";
-            std::cout << "[OPTI4001]  raw=" << mantissa << " exp=" << (int)exponent;
+                      << " CNT=0x" << (int)counter << std::dec << "\n";
+            std::cout << "[OPTI4001]  mantissa=" << mantissa << " exp=" << (int)exponent;
+            if (mantissa_saturated && exponent_low) {
+                std::cout << " [WARNING: Saturation! Auto-range not increasing exponent]";
+            }
         }
 
         // Calculate ADC_CODES
@@ -143,16 +163,17 @@ public:
         // Calculate lux
         // For PicoStar variant: lux = ADC_CODES * 312.5E-6
         // For SOT-5X3 variant: lux = ADC_CODES * 437.5E-6
-        // We'll use PicoStar formula (assuming this variant)
-        float lux = (float)adc_codes * 312.5e-6f;
+        // Using SOT-5X3 formula
+        float lux = (float)adc_codes * 437.5e-6f;
 
         if (debug_count <= 10) {
             std::cout << " lux=" << lux << "\n";
         }
 
-        // Sanity check (max ~83klux for PicoStar)
+        // Sanity check (max ~118klux for SOT-5X3 variant)
+        // Max = (2^20 - 1) * 2^8 * 437.5e-6 = 118,362 lux
         if (lux < 0.0f || lux > 120000.0f) {
-            if (debug_count <= 10) {
+            if (debug_count <= 10 || lux > 120000.0f) {
                 std::cerr << "[OPTI4001]  WARNING: lux out of range: " << lux << "\n";
             }
             // Don't fail, just clamp

@@ -19,6 +19,7 @@ set(CORE_SOURCES
     src/json_protocol.cpp
     src/zone_mapper.cpp
     src/brightness_controller.cpp
+    src/csv_logger.cpp
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
     src/sensors/fpga_opti4001_sensor.cpp
