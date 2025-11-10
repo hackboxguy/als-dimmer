@@ -98,21 +98,22 @@ float CANALSSensor::readLux() {
         return -1.0f;
     }
 
-    // Try to receive new CAN message
+    // Try to receive ALL pending CAN messages, keep only the freshest
+    // This drains the kernel buffer to avoid using stale data when
+    // messages arrive faster than the control loop reads them
     CANMessage msg;
-    if (receiveCANMessage(msg)) {
+    while (receiveCANMessage(msg)) {
         // Validate status byte
         if (msg.status != 0x00) {
             LOG_WARN("CANALSSensor", "Sensor status error (status=0x"
                      << std::hex << static_cast<int>(msg.status) << std::dec << ")");
-            return -1.0f;
+            continue;  // Skip this message, try next
         }
 
         // Validate checksum
         if (!validateChecksum(msg)) {
             LOG_WARN("CANALSSensor", "Invalid checksum, discarding message");
-            // Don't update last_lux_, wait for next valid message
-            return last_lux_.load();
+            continue;  // Skip this message, try next
         }
 
         // Extract lux value
@@ -123,12 +124,13 @@ float CANALSSensor::readLux() {
             LOG_WARN("CANALSSensor", "Unusually high lux value: " << lux);
         }
 
-        // Update cached value and timestamp
+        // Update cached value and timestamp with this fresher data
         last_lux_.store(static_cast<float>(lux));
         last_update_time_ = std::chrono::steady_clock::now();
 
         LOG_TRACE("CANALSSensor", "Received lux: " << lux
                   << " (seq: " << static_cast<int>(msg.sequence) << ")");
+        // Continue loop to drain any remaining messages in buffer
     }
 
     // Check if data is stale

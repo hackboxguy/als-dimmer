@@ -34,6 +34,19 @@ struct OutputConfig {
 };
 
 struct StepSizes {
+    // Asymmetric step sizes (optimized for human vision adaptation)
+    // Brightening is faster (light adaptation: 1-2 min)
+    // Dimming is slower (dark adaptation: 20-30 min, safety critical)
+    int large_up = 10;
+    int medium_up = 4;
+    int small_up = 2;
+
+    int large_down = 5;    // 50% slower - safer for entering dark areas
+    int medium_down = 2;   // 50% slower
+    int small_down = 1;    // 50% slower
+
+    // Legacy symmetric fields (for backward compatibility)
+    // If config doesn't specify _up/_down, these are used for both directions
     int large = 10;
     int medium = 4;
     int small = 2;
@@ -80,6 +93,7 @@ struct ControlConfig {
     int update_interval_ms = 500;
     int sensor_error_timeout_sec = 300;
     int fallback_brightness = 50;
+    float hysteresis_percent = 0.0f;  // Zone boundary hysteresis (0 = disabled, 5-15 typical)
     std::string state_file = "/var/lib/als-dimmer/state.json";
     int auto_resume_timeout_sec = 60;
     std::string log_level = "info";  // trace | debug | info | warn | error

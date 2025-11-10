@@ -39,6 +39,7 @@ int BrightnessController::calculateNextBrightness(int target_brightness,
 
 int BrightnessController::getStepSize(int error, const Zone* zone) const {
     int abs_error = std::abs(error);
+    bool brightening = (error > 0);
 
     // Get thresholds and step sizes from zone, or use defaults
     int threshold_large, threshold_small;
@@ -47,16 +48,33 @@ int BrightnessController::getStepSize(int error, const Zone* zone) const {
     if (zone) {
         threshold_large = zone->error_thresholds.large;
         threshold_small = zone->error_thresholds.small;
-        step_large = zone->step_sizes.large;
-        step_medium = zone->step_sizes.medium;
-        step_small = zone->step_sizes.small;
+
+        // Use asymmetric step sizes based on direction
+        // Brightening (entering bright areas): faster, safe for human vision
+        // Dimming (entering dark areas): slower, safety-critical to prevent temporary blindness
+        if (brightening) {
+            step_large = zone->step_sizes.large_up;
+            step_medium = zone->step_sizes.medium_up;
+            step_small = zone->step_sizes.small_up;
+        } else {
+            step_large = zone->step_sizes.large_down;
+            step_medium = zone->step_sizes.medium_down;
+            step_small = zone->step_sizes.small_down;
+        }
     } else {
-        // Simple mode defaults
+        // Simple mode defaults - apply 2:1 asymmetry for safety
         threshold_large = DEFAULT_THRESHOLD_LARGE;
         threshold_small = DEFAULT_THRESHOLD_SMALL;
-        step_large = DEFAULT_STEP_LARGE;
-        step_medium = DEFAULT_STEP_MEDIUM;
-        step_small = DEFAULT_STEP_SMALL;
+        if (brightening) {
+            step_large = DEFAULT_STEP_LARGE;
+            step_medium = DEFAULT_STEP_MEDIUM;
+            step_small = DEFAULT_STEP_SMALL;
+        } else {
+            // Dimming is 50% slower for safety
+            step_large = DEFAULT_STEP_LARGE / 2;
+            step_medium = DEFAULT_STEP_MEDIUM / 2;
+            step_small = DEFAULT_STEP_SMALL;  // Keep minimum at 1
+        }
     }
 
     // Select step size based on error magnitude

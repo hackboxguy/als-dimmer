@@ -295,8 +295,10 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<als_dimmer::ZoneMapper> zone_mapper;
     if (!config.zones.empty()) {
         try {
-            zone_mapper = std::make_unique<als_dimmer::ZoneMapper>(config.zones);
-            LOG_INFO("main", "Zone mapper initialized with " << config.zones.size() << " zones");
+            zone_mapper = std::make_unique<als_dimmer::ZoneMapper>(
+                config.zones, config.control.hysteresis_percent);
+            LOG_INFO("main", "Zone mapper initialized with " << config.zones.size() << " zones"
+                     << " (hysteresis: " << config.control.hysteresis_percent << "%)");
         } catch (const std::exception& e) {
             LOG_ERROR("main", "Failed to initialize zone mapper: " << e.what());
             return 1;

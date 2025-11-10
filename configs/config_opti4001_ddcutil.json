@@ -25,6 +25,7 @@
       "group": "root"
     },
     "update_interval_ms": 500,
+    "hysteresis_percent": 5.0,
     "sensor_error_timeout_sec": 300,
     "fallback_brightness": 50,
     "state_file": "/tmp/als-dimmer-state.json",
@@ -38,7 +39,11 @@
       "lux_range": [0, 10],
       "brightness_range": [5, 30],
       "curve": "logarithmic",
-      "step_sizes": {"large": 5, "medium": 2, "small": 1},
+      "step_sizes": {
+        "large_up": 5, "large_down": 3,
+        "medium_up": 2, "medium_down": 1,
+        "small_up": 1, "small_down": 1
+      },
       "error_thresholds": {"large": 20, "small": 5}
     },
     {
@@ -46,7 +51,11 @@
       "lux_range": [10, 500],
       "brightness_range": [30, 70],
       "curve": "linear",
-      "step_sizes": {"large": 8, "medium": 3, "small": 1},
+      "step_sizes": {
+        "large_up": 8, "large_down": 4,
+        "medium_up": 3, "medium_down": 2,
+        "small_up": 1, "small_down": 1
+      },
       "error_thresholds": {"large": 25, "small": 8}
     },
     {
@@ -54,7 +63,11 @@
       "lux_range": [500, 100000],
       "brightness_range": [70, 100],
       "curve": "logarithmic",
-      "step_sizes": {"large": 10, "medium": 4, "small": 2},
+      "step_sizes": {
+        "large_up": 10, "large_down": 5,
+        "medium_up": 4, "medium_down": 2,
+        "small_up": 2, "small_down": 1
+      },
       "error_thresholds": {"large": 30, "small": 10}
     }
   ],

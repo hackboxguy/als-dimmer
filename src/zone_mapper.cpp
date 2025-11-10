@@ -6,26 +6,64 @@
 
 namespace als_dimmer {
 
-ZoneMapper::ZoneMapper(const std::vector<Zone>& zones)
-    : zones_(zones) {
+ZoneMapper::ZoneMapper(const std::vector<Zone>& zones, float hysteresis_percent)
+    : zones_(zones), hysteresis_percent_(hysteresis_percent) {
     if (zones_.empty()) {
         throw std::runtime_error("ZoneMapper: At least one zone is required");
     }
 }
 
 const Zone* ZoneMapper::selectZone(float lux) const {
+    // If we have a current zone and hysteresis is enabled, check if we should stay
+    if (current_zone_ && hysteresis_percent_ > 0.0f) {
+        float lux_min = current_zone_->lux_range[0];
+        float lux_max = current_zone_->lux_range[1];
+
+        // Calculate hysteresis margins
+        float margin_lower = lux_min * hysteresis_percent_ / 100.0f;
+        float margin_upper = lux_max * hysteresis_percent_ / 100.0f;
+
+        // Expand zone boundaries by hysteresis margin
+        float lower_with_hysteresis = lux_min - margin_lower;
+        float upper_with_hysteresis = lux_max + margin_upper;
+
+        // Stay in current zone if within hysteresis band
+        if (lux >= lower_with_hysteresis && lux < upper_with_hysteresis) {
+            return current_zone_;
+        }
+    }
+
     // Find the zone that contains this lux value
+    const Zone* previous_zone = current_zone_;
     for (const auto& zone : zones_) {
         float lux_min = zone.lux_range[0];
         float lux_max = zone.lux_range[1];
 
         if (lux >= lux_min && lux < lux_max) {
-            return &zone;
+            current_zone_ = &zone;
+
+            // Log zone transition
+            if (previous_zone && previous_zone != current_zone_) {
+                LOG_INFO("ZoneMapper", "Zone transition: "
+                         << previous_zone->name << " -> " << zone.name
+                         << " (lux=" << lux << ")");
+            }
+
+            return current_zone_;
         }
     }
 
     // If lux is beyond all zones, use the last zone
-    return &zones_.back();
+    current_zone_ = &zones_.back();
+
+    // Log zone transition
+    if (previous_zone && previous_zone != current_zone_) {
+        LOG_INFO("ZoneMapper", "Zone transition: "
+                 << previous_zone->name << " -> " << current_zone_->name
+                 << " (lux=" << lux << ", out of range)");
+    }
+
+    return current_zone_;
 }
 
 std::string ZoneMapper::getCurrentZoneName(float lux) const {

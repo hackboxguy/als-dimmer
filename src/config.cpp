@@ -147,6 +147,9 @@ Config Config::loadFromFile(const std::string& filename) {
         if (control_json.contains("fallback_brightness")) {
             config.control.fallback_brightness = control_json["fallback_brightness"].get<int>();
         }
+        if (control_json.contains("hysteresis_percent")) {
+            config.control.hysteresis_percent = control_json["hysteresis_percent"].get<float>();
+        }
         if (control_json.contains("state_file")) {
             config.control.state_file = control_json["state_file"].get<std::string>();
         }
@@ -191,6 +194,8 @@ Config Config::loadFromFile(const std::string& filename) {
         // Parse step sizes (with defaults)
         if (zone_json.contains("step_sizes")) {
             auto& step_json = zone_json["step_sizes"];
+
+            // Parse legacy symmetric fields (backward compatibility)
             if (step_json.contains("large")) {
                 zone.step_sizes.large = step_json["large"].get<int>();
             }
@@ -199,6 +204,26 @@ Config Config::loadFromFile(const std::string& filename) {
             }
             if (step_json.contains("small")) {
                 zone.step_sizes.small = step_json["small"].get<int>();
+            }
+
+            // Parse asymmetric fields (override defaults if specified)
+            if (step_json.contains("large_up")) {
+                zone.step_sizes.large_up = step_json["large_up"].get<int>();
+            }
+            if (step_json.contains("medium_up")) {
+                zone.step_sizes.medium_up = step_json["medium_up"].get<int>();
+            }
+            if (step_json.contains("small_up")) {
+                zone.step_sizes.small_up = step_json["small_up"].get<int>();
+            }
+            if (step_json.contains("large_down")) {
+                zone.step_sizes.large_down = step_json["large_down"].get<int>();
+            }
+            if (step_json.contains("medium_down")) {
+                zone.step_sizes.medium_down = step_json["medium_down"].get<int>();
+            }
+            if (step_json.contains("small_down")) {
+                zone.step_sizes.small_down = step_json["small_down"].get<int>();
             }
         }
 
@@ -322,6 +347,9 @@ void Config::validate() const {
     }
     if (control.fallback_brightness < 0 || control.fallback_brightness > 100) {
         throw ConfigError("control.fallback_brightness must be between 0 and 100");
+    }
+    if (control.hysteresis_percent < 0.0f || control.hysteresis_percent > 50.0f) {
+        throw ConfigError("control.hysteresis_percent must be between 0 and 50");
     }
 
     // Validate socket configuration
