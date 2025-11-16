@@ -151,6 +151,11 @@ std::string processCommand(const std::string& command,
                     }
 
                     std::string mode_str = parsed_cmd.params["mode"].get<std::string>();
+                    if (mode_str == "manual_temporary") {
+                        return generateErrorResponse(
+                            "MANUAL_TEMPORARY is managed automatically; clients may only request 'auto' or 'manual'",
+                            "INVALID_PARAMS");
+                    }
                     if (mode_str != "auto" && mode_str != "manual") {
                         return generateErrorResponse("Mode must be 'auto' or 'manual'", "INVALID_PARAMS");
                     }
