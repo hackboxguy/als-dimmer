@@ -52,6 +52,9 @@ Config Config::loadFromFile(const std::string& filename) {
     if (sensor_json.contains("timeout_ms")) {
         config.sensor.timeout_ms = sensor_json["timeout_ms"].get<int>();
     }
+    if (sensor_json.contains("scale_factor")) {
+        config.sensor.scale_factor = sensor_json["scale_factor"].get<float>();
+    }
 
     // Parse output configuration
     if (!j.contains("output")) {

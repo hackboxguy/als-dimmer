@@ -28,8 +28,8 @@ namespace als_dimmer {
  */
 class FPGAOpti4001Sensor : public SensorInterface {
 public:
-    FPGAOpti4001Sensor(const std::string& device, uint8_t address)
-        : device_(device), address_(address), i2c_fd_(-1), healthy_(false) {}
+    FPGAOpti4001Sensor(const std::string& device, uint8_t address, float scale_factor)
+        : device_(device), address_(address), scale_factor_(scale_factor), i2c_fd_(-1), healthy_(false) {}
 
     ~FPGAOpti4001Sensor() {
         if (i2c_fd_ >= 0) {
@@ -109,8 +109,8 @@ public:
         // Byte 3: LSB
         uint32_t raw_value = ((uint32_t)buf[1] << 16) | ((uint32_t)buf[2] << 8) | buf[3];
 
-        // Convert to lux: raw * 0.64
-        float lux = raw_value * 0.64f;
+        // Convert to lux using configurable scale_factor
+        float lux = raw_value * scale_factor_;
 
         // Debug output (first 10 readings)
         static int debug_count = 0;
@@ -145,15 +145,16 @@ public:
 private:
     std::string device_;
     uint8_t address_;
+    float scale_factor_;
     int i2c_fd_;
     bool healthy_;
 };
 
 // Factory function
-std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address_str) {
+std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address_str, float scale_factor) {
     // Parse hex address string (e.g., "0x1D")
     uint8_t address = std::stoi(address_str, nullptr, 16);
-    return std::make_unique<FPGAOpti4001Sensor>(device, address);
+    return std::make_unique<FPGAOpti4001Sensor>(device, address, scale_factor);
 }
 
 } // namespace als_dimmer

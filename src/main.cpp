@@ -22,7 +22,7 @@ namespace als_dimmer {
 // Forward declarations
 std::unique_ptr<SensorInterface> createFileSensor(const std::string& file_path);
 std::unique_ptr<SensorInterface> createOPTI4001Sensor(const std::string& device, const std::string& address);
-std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address);
+std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address, float scale_factor);
 
 std::unique_ptr<OutputInterface> createFileOutput(const std::string& file_path);
 #ifdef HAVE_DDCUTIL
@@ -41,7 +41,7 @@ std::unique_ptr<als_dimmer::SensorInterface> createSensor(const als_dimmer::Conf
     } else if (config.sensor.type == "opti4001") {
         return als_dimmer::createOPTI4001Sensor(config.sensor.device, config.sensor.address);
     } else if (config.sensor.type == "fpga_opti4001") {
-        return als_dimmer::createFPGAOpti4001Sensor(config.sensor.device, config.sensor.address);
+        return als_dimmer::createFPGAOpti4001Sensor(config.sensor.device, config.sensor.address, config.sensor.scale_factor);
     } else if (config.sensor.type == "can_als") {
         // Parse CAN ID from hex string (e.g., "0x0A2" -> 0x0A2)
         uint32_t can_id = static_cast<uint32_t>(std::stoul(config.sensor.can_id, nullptr, 16));
@@ -101,7 +101,9 @@ std::string processCommand(const std::string& command,
                           float current_lux,
                           int current_brightness,
                           std::chrono::steady_clock::time_point& manual_temp_start,
-                          als_dimmer::ZoneMapper* zone_mapper) {
+                          als_dimmer::ZoneMapper* zone_mapper,
+                          bool& manual_override_occurred,
+                          std::string& manual_override_type) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -182,6 +184,10 @@ std::string processCommand(const std::string& command,
 
                     state_mgr.setManualBrightness(brightness);
 
+                    // Set override tracking flags for CSV logging
+                    manual_override_occurred = true;
+                    manual_override_type = "set_brightness";
+
                     // If in AUTO mode, switch to MANUAL_TEMPORARY
                     if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
                         state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
@@ -207,6 +213,10 @@ std::string processCommand(const std::string& command,
                     int new_brightness = std::max(0, std::min(100, current + delta));
 
                     state_mgr.setManualBrightness(new_brightness);
+
+                    // Set override tracking flags for CSV logging
+                    manual_override_occurred = true;
+                    manual_override_type = "adjust_brightness";
 
                     if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
                         state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
@@ -388,13 +398,19 @@ int main(int argc, char* argv[]) {
     std::string previous_zone_name = "";
     auto csv_start_time = std::chrono::steady_clock::now();
 
+    // Manual override tracking for CSV logging
+    bool manual_override_occurred = false;
+    std::string manual_override_type = "";
+
     while (!should_exit) {
         // Process TCP commands
         while (control.hasCommand()) {
             std::string cmd = control.getNextCommand();
+
             std::string response = processCommand(cmd, state_mgr, control, current_lux,
                                                   output->getCurrentBrightness(), manual_temp_start,
-                                                  zone_mapper.get());
+                                                  zone_mapper.get(),
+                                                  manual_override_occurred, manual_override_type);
             control.sendResponse(response);
 
             if (cmd == "SHUTDOWN") {
@@ -452,6 +468,12 @@ int main(int argc, char* argv[]) {
                     double timestamp = std::chrono::duration<double>(now - csv_start_time).count();
                     bool zone_changed = (current_zone_name != previous_zone_name);
 
+                    // Extract time-of-day info for ML
+                    auto now_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                    std::tm* now_tm = std::localtime(&now_time_t);
+                    int hour_of_day = now_tm->tm_hour;  // 0-23
+                    int day_of_week = now_tm->tm_wday;  // 0-6 (0=Sunday)
+
                     als_dimmer::CSVLogger::IterationData log_data;
                     log_data.timestamp = timestamp;
                     log_data.seq = iteration_seq;
@@ -471,9 +493,18 @@ int main(int argc, char* argv[]) {
                     log_data.step_threshold_small = transition_info.step_threshold_small;
                     log_data.mode = "AUTO";
 
+                    // Manual override tracking
+                    log_data.manual_override_event = manual_override_occurred;
+                    log_data.auto_target_brightness = target_brightness;  // Same as target in AUTO mode
+                    log_data.override_type = manual_override_type;
+                    log_data.hour_of_day = hour_of_day;
+                    log_data.day_of_week = day_of_week;
+
                     csv_logger->logIteration(log_data);
 
                     previous_zone_name = current_zone_name;
+                    manual_override_occurred = false;  // Clear flag after logging
+                    manual_override_type = "";
                 }
 
                 previous_brightness = transition_info.next_brightness;
@@ -503,29 +534,64 @@ int main(int argc, char* argv[]) {
 
             // CSV logging (MANUAL mode)
             if (csv_logger) {
+                // Read sensor to get current lux (needed for AUTO target calculation)
+                current_lux = sensor->readLux();
+
+                // Calculate what AUTO mode WOULD target (even though we're in MANUAL mode)
+                int auto_target_brightness = 0;
+                std::string zone_name = "manual";
+                std::string curve_type = "manual";
+
+                if (current_lux >= 0 && zone_mapper) {
+                    auto_target_brightness = zone_mapper->mapLuxToBrightness(current_lux);
+                    zone_name = zone_mapper->getCurrentZoneName(current_lux);
+                    const als_dimmer::Zone* zone = zone_mapper->selectZone(current_lux);
+                    curve_type = zone ? zone->curve : "unknown";
+                } else if (current_lux >= 0) {
+                    auto_target_brightness = mapLuxToBrightnessSimple(current_lux);
+                    zone_name = "simple";
+                    curve_type = "linear";
+                }
+
                 auto now = std::chrono::steady_clock::now();
                 double timestamp = std::chrono::duration<double>(now - csv_start_time).count();
+
+                // Extract time-of-day info for ML
+                auto now_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                std::tm* now_tm = std::localtime(&now_time_t);
+                int hour_of_day = now_tm->tm_hour;  // 0-23
+                int day_of_week = now_tm->tm_wday;  // 0-6 (0=Sunday)
 
                 als_dimmer::CSVLogger::IterationData log_data;
                 log_data.timestamp = timestamp;
                 log_data.seq = iteration_seq;
-                log_data.lux = current_lux;  // May be stale in manual mode
+                log_data.lux = current_lux;
                 log_data.sensor_healthy = sensor->isHealthy();
-                log_data.zone_name = "manual";
+                log_data.zone_name = zone_name;
                 log_data.zone_changed = false;
-                log_data.curve = "manual";
-                log_data.target_brightness = manual_brightness;
+                log_data.curve = curve_type;
+                log_data.target_brightness = manual_brightness;  // What user set
                 log_data.current_brightness = current_brightness_before;
                 log_data.previous_brightness = previous_brightness;
                 log_data.brightness_change = manual_brightness - previous_brightness;
-                log_data.error = 0;  // No error in manual mode
+                log_data.error = 0;  // No control error in manual mode
                 log_data.step_category = "manual";
                 log_data.step_size = 0;
                 log_data.step_threshold_large = 0;
                 log_data.step_threshold_small = 0;
                 log_data.mode = mode_str;
 
+                // Manual override tracking - CRITICAL for ML training
+                log_data.manual_override_event = manual_override_occurred;
+                log_data.auto_target_brightness = auto_target_brightness;  // What AUTO would have calculated
+                log_data.override_type = manual_override_type;
+                log_data.hour_of_day = hour_of_day;
+                log_data.day_of_week = day_of_week;
+
                 csv_logger->logIteration(log_data);
+
+                manual_override_occurred = false;  // Clear flag after logging
+                manual_override_type = "";
             }
 
             previous_brightness = manual_brightness;

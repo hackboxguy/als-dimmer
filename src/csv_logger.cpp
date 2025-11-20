@@ -35,7 +35,9 @@ void CSVLogger::writeHeader() {
           << "target_brightness,current_brightness,previous_brightness,"
           << "error,step_category,step_size,"
           << "step_threshold_large,step_threshold_small,"
-          << "brightness_change,mode,sensor_healthy\n";
+          << "brightness_change,mode,sensor_healthy,"
+          << "manual_override_event,auto_target_brightness,override_type,"
+          << "hour_of_day,day_of_week\n";
     file_.flush();  // Ensure header is written immediately
 }
 
@@ -62,7 +64,12 @@ void CSVLogger::logIteration(const IterationData& data) {
         << data.step_threshold_small << ","
         << data.brightness_change << ","
         << escapeCSV(data.mode) << ","
-        << (data.sensor_healthy ? "1" : "0") << "\n";
+        << (data.sensor_healthy ? "1" : "0") << ","
+        << (data.manual_override_event ? "1" : "0") << ","
+        << data.auto_target_brightness << ","
+        << escapeCSV(data.override_type) << ","
+        << data.hour_of_day << ","
+        << data.day_of_week << "\n";
 
     // Add to buffer
     buffer_.push_back(row.str());

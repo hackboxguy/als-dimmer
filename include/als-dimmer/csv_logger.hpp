@@ -45,6 +45,13 @@ public:
 
         // Mode
         std::string mode;          // "AUTO", "MANUAL", etc.
+
+        // Manual override tracking (for ML analysis)
+        bool manual_override_event;     // True if user manually adjusted brightness this iteration
+        int auto_target_brightness;     // What AUTO mode would calculate (even in MANUAL mode)
+        std::string override_type;      // "set_brightness", "adjust_brightness", or empty
+        int hour_of_day;               // 0-23 for time-of-day patterns
+        int day_of_week;               // 0-6 (0=Sunday) for weekly patterns
     };
 
     /**

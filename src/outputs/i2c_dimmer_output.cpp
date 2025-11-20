@@ -84,6 +84,26 @@ std::string I2CDimmerOutput::getType() const {
     return (type_ == DimmerType::DIMMER_200) ? "dimmer200" : "dimmer800";
 }
 
+// Static helper function to convert decimal to BCD format (16-bit)
+// Converts 0-999 decimal to two BCD bytes
+// Example: 456 -> msb=0x04 (thousands=0, hundreds=4), lsb=0x56 (tens=5, ones=6)
+static void decimalToBCD16(int value, uint8_t& msb, uint8_t& lsb) {
+    // Clamp to valid range (0-999 for 3-digit BCD)
+    value = std::max(0, std::min(999, value));
+
+    // Extract decimal digits
+    int thousands = (value / 1000) % 10;
+    int hundreds = (value / 100) % 10;
+    int tens = (value / 10) % 10;
+    int ones = value % 10;
+
+    // Pack into BCD bytes
+    // MSB: [thousands:4bits][hundreds:4bits]
+    // LSB: [tens:4bits][ones:4bits]
+    msb = static_cast<uint8_t>((thousands << 4) | hundreds);
+    lsb = static_cast<uint8_t>((tens << 4) | ones);
+}
+
 bool I2CDimmerOutput::writeI2CBrightness(int native_value) {
     if (fd_ < 0) {
         std::cerr << "[I2CDimmer]  I2C device not initialized\n";
@@ -105,12 +125,18 @@ bool I2CDimmerOutput::writeI2CBrightness(int native_value) {
 
     if (type_ == DimmerType::DIMMER_200) {
         // dimmer200: 5 bytes total (header + command + 1-byte value)
+        // NOTE: Current FPGA firmware for dimmer200 is inconsistent
+        // Keeping binary encoding for now until FPGA firmware is clarified
         buffer[4] = static_cast<uint8_t>(native_value);
         buffer_len = 5;
     } else {
-        // dimmer800: 6 bytes total (header + command + 2-byte big-endian value)
-        buffer[4] = static_cast<uint8_t>((native_value >> 8) & 0xFF);  // High byte
-        buffer[5] = static_cast<uint8_t>(native_value & 0xFF);          // Low byte
+        // dimmer800: 6 bytes total (header + command + 2-byte BCD value)
+        // FPGA expects BCD encoding for register 0x35
+        // Convert decimal to BCD (e.g., 456 -> 0x04 0x56)
+        uint8_t msb, lsb;
+        decimalToBCD16(native_value, msb, lsb);
+        buffer[4] = msb;  // BCD: thousands and hundreds
+        buffer[5] = lsb;  // BCD: tens and ones
         buffer_len = 6;
     }
 

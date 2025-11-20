@@ -19,6 +19,9 @@ struct SensorConfig {
     std::string can_interface;  // e.g., "can0"
     std::string can_id;         // e.g., "0x0A2"
     int timeout_ms = 5000;      // Timeout for considering data stale
+
+    // Calibration/scaling factor for sensor readings
+    float scale_factor = 0.64f;  // Default for fpga_opti4001 (changed to 1.64 for calibration)
 };
 
 struct OutputConfig {
