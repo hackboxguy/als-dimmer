@@ -6,6 +6,8 @@ Wants=network.target
 
 [Service]
 Type=simple
+# Pre-initialization script to enable I2C device access
+ExecStartPre=/home/pi/micropanel/bin/init-hh983-fpdlink.sh
 ExecStart=@CMAKE_INSTALL_PREFIX@/bin/als-dimmer --config @CMAKE_INSTALL_PREFIX@/etc/als-dimmer/config.json
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
