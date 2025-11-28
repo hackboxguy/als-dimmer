@@ -20,7 +20,7 @@
     "unix_socket": {
       "enabled": true,
       "path": "/tmp/als-dimmer.sock",
-      "permissions": "0660",
+      "permissions": "0666",
       "owner": "root",
       "group": "root"
     },
