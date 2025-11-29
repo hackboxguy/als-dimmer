@@ -37,7 +37,7 @@
     {
       "name": "night",
       "lux_range": [0, 10],
-      "brightness_range": [5, 30],
+      "brightness_range": [15, 30],
       "curve": "logarithmic",
       "step_sizes": {"large": 5, "medium": 2, "small": 1},
       "error_thresholds": {"large": 20, "small": 5}

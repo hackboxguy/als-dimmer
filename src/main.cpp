@@ -162,6 +162,13 @@ std::string processCommand(const std::string& command,
                         return generateErrorResponse("Mode must be 'auto' or 'manual'", "INVALID_PARAMS");
                     }
 
+                    // When switching to MANUAL mode, preserve current brightness
+                    // to avoid jarring brightness jumps (smooth handover of control)
+                    if (mode_str == "manual") {
+                        state_mgr.setManualBrightness(current_brightness);
+                        LOG_DEBUG("main", "Preserving current brightness " << current_brightness << "% for MANUAL mode");
+                    }
+
                     auto new_mode = als_dimmer::StateManager::stringToMode(mode_str);
                     state_mgr.setMode(new_mode);
                     LOG_INFO("main", "Mode set to: " << mode_str << " (JSON)");
@@ -430,11 +437,11 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Always read sensor (for status reporting in all modes)
+        current_lux = sensor->readLux();
+
         // Control logic based on operating mode
         if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
-            // Read sensor
-            current_lux = sensor->readLux();
-
             if (current_lux >= 0) {
                 // Map lux to brightness using zone mapper (or simple mapping as fallback)
                 int target_brightness;
@@ -534,9 +541,6 @@ int main(int argc, char* argv[]) {
 
             // CSV logging (MANUAL mode)
             if (csv_logger) {
-                // Read sensor to get current lux (needed for AUTO target calculation)
-                current_lux = sensor->readLux();
-
                 // Calculate what AUTO mode WOULD target (even though we're in MANUAL mode)
                 int auto_target_brightness = 0;
                 std::string zone_name = "manual";
