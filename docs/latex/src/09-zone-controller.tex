@@ -1,0 +1,399 @@
+%------------------------
+% Section 9: Zone Controller and Brightness Control Loop
+%------------------------
+\section{Zone Controller and Control Loop}
+
+This section describes how the zone mapper and brightness controller integrate to form the adaptive brightness control loop.
+
+\subsection{Control Loop Overview}
+
+ALS-Dimmer operates in a continuous control loop with the following structure:
+
+\begin{lstlisting}[language=C++, caption={Main Control Loop -- Simplified AUTO Mode (Pseudocode)}]
+while (running) {
+    // 1. Read ambient light sensor
+    lux = sensor->readLux();
+
+    if (lux >= 0) {  // Valid reading
+        // 2. Map lux to target brightness using zone
+        target = zone_mapper->mapLuxToBrightness(lux);
+        current_zone = zone_mapper->selectZone(lux);
+
+        // 3. Calculate smooth transition to target
+        current = output->getCurrentBrightness();
+        next = brightness_controller->calculateNextBrightness(
+            target, current, current_zone);
+
+        // 4. Update display output
+        output->setBrightness(next);
+    }
+
+    // 5. Sleep until next iteration
+    sleep(update_interval_ms);  // typically 200-500 ms
+}
+\end{lstlisting}
+
+\textbf{Note:} This pseudocode focuses on the core AUTO mode brightness adaptation logic. The actual implementation includes additional features omitted here for clarity: (1)~operating mode handling (AUTO/MANUAL/MANUAL\_TEMPORARY, see Section~9.4), (2)~control interface command processing (see Section~11), (3)~MANUAL\_TEMPORARY timeout checking, and (4)~state management. Method names shown match the actual C++ implementation.
+
+\subsection{Zone Mapper Implementation}
+
+The zone mapper maintains the current active zone and handles transitions.
+
+\subsubsection{Zone Selection Logic}
+
+\begin{lstlisting}[language=C++, caption={Zone Selection with Hysteresis}]
+const Zone* ZoneMapper::selectZone(float lux) const {
+    // If hysteresis enabled, check if we should stay in current zone
+    if (current_zone_ && hysteresis_percent_ > 0.0f) {
+        float lux_min = current_zone_->lux_range[0];
+        float lux_max = current_zone_->lux_range[1];
+
+        // Calculate hysteresis margins
+        float margin_lower = lux_min * hysteresis_percent_ / 100.0f;
+        float margin_upper = lux_max * hysteresis_percent_ / 100.0f;
+
+        // Expand boundaries by hysteresis margin
+        if (lux >= (lux_min - margin_lower) &&
+            lux < (lux_max + margin_upper)) {
+            return current_zone_;  // Stay in current zone
+        }
+    }
+
+    // Find new zone based on lux value
+    const Zone* previous_zone = current_zone_;
+    for (const auto& zone : zones_) {
+        if (lux >= zone.lux_range[0] && lux < zone.lux_range[1]) {
+            current_zone_ = &zone;
+
+            // Log zone transition
+            if (previous_zone && previous_zone != current_zone_) {
+                LOG_INFO("Zone transition: " << previous_zone->name
+                         << " -> " << zone.name << " (lux=" << lux << ")");
+            }
+            return current_zone_;
+        }
+    }
+
+    // Fallback: use last zone
+    current_zone_ = &zones_.back();
+    return current_zone_;
+}
+\end{lstlisting}
+
+\textbf{Key features:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Hysteresis:} Optional feature to prevent oscillation near zone boundaries. Configured via \texttt{control.hysteresis\_percent} (0 = disabled, 5--15 typical for automotive use). When disabled (default: 0), zone selection uses direct boundary checks.
+    \item \textbf{Logging:} Zone transitions logged for debugging and analytics
+    \item \textbf{Fallback:} Graceful handling if lux falls outside all zones
+\end{itemize}
+
+\clearpage
+
+\subsubsection{Zone Configuration Structure}
+
+Each zone is defined by the following parameters:
+
+\begin{table}[h]
+\centering
+\caption{Zone Configuration Parameters}
+\label{tab:zone_params}
+\begin{tabular}{@{}llp{0.4\textwidth}@{}}
+\toprule
+\textbf{Parameter} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\texttt{name} & String & Human-readable zone identifier \\
+\texttt{lux\_range} & Float[2] & Lux boundaries [min, max] (min inclusive, max exclusive) \\
+\texttt{brightness\_range} & Int[2] & Brightness range [min, max] (0--100) \\
+\texttt{curve} & String & \texttt{linear} or \texttt{logarithmic} \\
+\midrule
+\multicolumn{3}{@{}l@{}}{\textit{Step sizes (asymmetric for human vision adaptation):}} \\
+\texttt{large\_up} & Integer & Large step size for brightening (default: 10) \\
+\texttt{medium\_up} & Integer & Medium step size for brightening (default: 4) \\
+\texttt{small\_up} & Integer & Small step size for brightening (default: 2) \\
+\texttt{large\_down} & Integer & Large step size for dimming (default: 5) \\
+\texttt{medium\_down} & Integer & Medium step size for dimming (default: 2) \\
+\texttt{small\_down} & Integer & Small step size for dimming (default: 1) \\
+\midrule
+\multicolumn{3}{@{}l@{}}{\textit{Error thresholds (determine which step size to use):}} \\
+\texttt{threshold\_large} & Integer & Error above which large steps used (default: 30) \\
+\texttt{threshold\_small} & Integer & Error below which small steps used (default: 10) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Note:} Asymmetric step sizes implement safety-critical dimming behavior: brightening is ~2× faster than dimming to match human vision adaptation (light adaptation: 1--2 min, dark adaptation: 20--30 min).
+
+\subsection{Brightness Controller Implementation}
+
+The brightness controller calculates target brightness and manages transitions.
+
+\subsubsection{Target Brightness Calculation}
+
+The ZoneMapper calculates target brightness using curve-specific methods:
+
+\begin{lstlisting}[language=C++, caption={Linear Brightness Calculation}]
+int ZoneMapper::calculateLinear(float lux, const Zone& zone) const {
+    float lux_min = zone.lux_range[0];
+    float lux_max = zone.lux_range[1];
+    int bright_min = zone.brightness_range[0];
+    int bright_max = zone.brightness_range[1];
+
+    // Clamp lux to zone range
+    float lux_clamped = std::max(lux_min, std::min(lux, lux_max));
+
+    // Linear interpolation
+    float lux_range = lux_max - lux_min;
+    if (lux_range <= 0.0f) {
+        return bright_min;  // Avoid division by zero
+    }
+
+    float normalized = (lux_clamped - lux_min) / lux_range;
+    int brightness = bright_min +
+        static_cast<int>(normalized * (bright_max - bright_min));
+
+    // Clamp to valid brightness range
+    return std::max(0, std::min(100, brightness));
+}
+\end{lstlisting}
+
+\begin{lstlisting}[language=C++, caption={Logarithmic Brightness Calculation}]
+int ZoneMapper::calculateLogarithmic(float lux, const Zone& zone) const {
+    float lux_min = zone.lux_range[0];
+    float lux_max = zone.lux_range[1];
+    int bright_min = zone.brightness_range[0];
+    int bright_max = zone.brightness_range[1];
+
+    // Clamp lux to zone range
+    float lux_clamped = std::max(lux_min, std::min(lux, lux_max));
+
+    // Logarithmic mapping using log(1 + x) to avoid log(0)
+    float lux_offset = lux_clamped - lux_min;
+    float lux_range = lux_max - lux_min;
+
+    if (lux_range <= 0.0f) {
+        return bright_min;  // Avoid division by zero
+    }
+
+    // Add 1 to avoid log(0), then normalize
+    float normalized = std::log(1.0f + lux_offset) /
+                       std::log(1.0f + lux_range);
+    int brightness = bright_min +
+        static_cast<int>(normalized * (bright_max - bright_min));
+
+    // Clamp to valid brightness range
+    return std::max(0, std::min(100, brightness));
+}
+\end{lstlisting}
+
+\textbf{Key features:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Curve-specific methods:} Separate implementations for linear and logarithmic curves
+    \item \textbf{Safe logarithmic formula:} Uses $\log(1 + x)$ to avoid $\log(0)$ issues and numerical instability
+    \item \textbf{Error handling:} Division-by-zero protection for malformed zone configurations
+    \item \textbf{Range clamping:} Final brightness clamped to valid [0, 100] range
+\end{itemize}
+
+\subsubsection{Asymmetric Transition Control}
+
+The brightness controller implements asymmetric step sizing to match human vision adaptation physiology: fast brightening (light adaptation: 1--2 min) and slow dimming (dark adaptation: 20--30 min, safety-critical for automotive use).
+
+\begin{lstlisting}[language=C++, caption={Asymmetric Step Selection}]
+int BrightnessController::getStepSize(int error, const Zone* zone) const {
+    int abs_error = std::abs(error);
+    bool brightening = (error > 0);
+
+    // Get thresholds and step sizes from zone, or use defaults
+    int threshold_large, threshold_small;
+    int step_large, step_medium, step_small;
+
+    if (zone) {
+        threshold_large = zone->error_thresholds.large;
+        threshold_small = zone->error_thresholds.small;
+
+        // Use asymmetric step sizes based on direction
+        if (brightening) {
+            step_large = zone->step_sizes.large_up;
+            step_medium = zone->step_sizes.medium_up;
+            step_small = zone->step_sizes.small_up;
+        } else {
+            step_large = zone->step_sizes.large_down;
+            step_medium = zone->step_sizes.medium_down;
+            step_small = zone->step_sizes.small_down;
+        }
+    } else {
+        // Simple mode defaults - apply 2:1 asymmetry for safety
+        threshold_large = DEFAULT_THRESHOLD_LARGE;  // 20
+        threshold_small = DEFAULT_THRESHOLD_SMALL;  // 5
+        if (brightening) {
+            step_large = 5;
+            step_medium = 2;
+            step_small = 1;
+        } else {
+            step_large = 2;  // 50% slower
+            step_medium = 1;
+            step_small = 1;
+        }
+    }
+
+    // Select step size based on error magnitude
+    if (abs_error > threshold_large) {
+        return step_large;      // Large error: fast convergence
+    } else if (abs_error > threshold_small) {
+        return step_medium;     // Medium error: moderate convergence
+    } else {
+        return step_small;      // Small error: fine-tuning
+    }
+}
+\end{lstlisting}
+
+\textbf{Key features:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Threshold-based step sizing:} Three error thresholds (large/medium/small) determine fixed step sizes rather than proportional gain
+    \item \textbf{Asymmetric by direction:} Separate step sizes for brightening (\texttt{\_up}) vs dimming (\texttt{\_down})
+    \item \textbf{Safety-focused dimming:} Dimming is ~50\% slower to prevent temporary blindness when entering dark areas (e.g., tunnels)
+    \item \textbf{Backward compatibility:} Legacy symmetric \texttt{step\_sizes.large/medium/small} fields still supported
+    \item \textbf{Zone-specific tuning:} Each zone can define custom asymmetric step sizes and error thresholds
+\end{itemize}
+
+\textbf{Hardware test results:} Real-world testing on Raspberry Pi 4 with OPT4001 sensor and DDC/CI monitor validated the asymmetric behavior:
+\begin{itemize}[leftmargin=*]
+    \item Brightening: 55\% change in ~7 seconds (7.9\%/sec)
+    \item Dimming: 54\% change in ~16 seconds (3.4\%/sec)
+    \item Asymmetry ratio: 2.3× slower dimming, as designed for safety
+\end{itemize}
+
+\textbf{Future enhancement:} A proportional gain approach ($step = k \times |error|$) could provide smoother convergence than threshold-based fixed steps, at the cost of implementation complexity and potential oscillation near target values. The current threshold-based approach is simpler, more predictable, and has proven effective in real-world automotive testing.
+
+\subsection{Integration with Operating Modes}
+
+The control loop respects three operating modes: \texttt{AUTO}, \texttt{MANUAL}, and \texttt{MANUAL\_TEMPORARY}. Note that \texttt{MANUAL\_TEMPORARY} is an intermediate state that cannot be set directly by external clients---it is triggered automatically when a client sets manual brightness while the system is in \texttt{AUTO} mode.
+
+\begin{lstlisting}[language=C++, caption={Mode-Aware Control Loop -- Simplified (Pseudocode)}]
+while (running) {
+    // Process control interface commands (SET_BRIGHTNESS, SET_MODE, etc.)
+    processCommands();
+
+    // Check for auto-resume from MANUAL_TEMPORARY
+    if (mode == OperatingMode::MANUAL_TEMPORARY) {
+        elapsed = getTimeSinceManualSet();
+        if (elapsed >= auto_resume_timeout_sec) {
+            mode = OperatingMode::AUTO;
+            LOG_INFO("Auto-resuming AUTO mode (timeout expired)");
+        }
+    }
+
+    // Mode-based control logic
+    if (mode == OperatingMode::AUTO) {
+        // Read sensor and calculate brightness
+        lux = sensor->readLux();
+
+        if (lux >= 0) {  // Valid reading
+            target = zone_mapper->mapLuxToBrightness(lux);
+            current_zone = zone_mapper->selectZone(lux);
+            current = output->getCurrentBrightness();
+            next = brightness_controller->calculateNextBrightness(
+                target, current, current_zone);
+            output->setBrightness(next);
+        }
+
+    } else {  // MANUAL or MANUAL_TEMPORARY
+        // Use manual brightness (set by client via control interface)
+        manual = state_manager->getManualBrightness();
+        output->setBrightness(manual);
+    }
+
+    sleep(update_interval_ms);  // typically 500 ms
+}
+\end{lstlisting}
+
+\textbf{Note:} This pseudocode simplifies the actual implementation for clarity. Omitted details include: (1)~command processing via TCP/Unix sockets (see Section~11), (2)~periodic state persistence, (3)~error handling and logging, and (4)~shutdown handling. Method names match the actual C++ implementation.
+
+\subsubsection{MANUAL\_TEMPORARY Mode Triggering}
+
+The \texttt{MANUAL\_TEMPORARY} mode is a read-only intermediate state that provides temporary manual control with automatic resumption. External clients cannot directly set this mode via the control interface.
+
+\textbf{Triggering behavior:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{From AUTO mode:} When a client sends \texttt{SET\_BRIGHTNESS} while in \texttt{AUTO} mode, the system automatically transitions to \texttt{MANUAL\_TEMPORARY} and starts the auto-resume timer
+    \item \textbf{From MANUAL\_TEMPORARY:} Subsequent \texttt{SET\_BRIGHTNESS} commands reset the auto-resume timer, keeping the system in \texttt{MANUAL\_TEMPORARY}
+    \item \textbf{From MANUAL mode:} \texttt{SET\_BRIGHTNESS} commands update brightness but remain in \texttt{MANUAL} mode (no auto-resume)
+\end{itemize}
+
+\textbf{Exit conditions:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Timeout:} After \texttt{auto\_resume\_timeout\_sec} (default: 60s) with no brightness adjustments, automatically transition to \texttt{AUTO}
+    \item \textbf{Explicit mode change:} Client sends \texttt{SET\_MODE auto} or \texttt{SET\_MODE manual}
+    \item \textbf{System restart:} \texttt{MANUAL\_TEMPORARY} does not persist across restarts (reverts to \texttt{AUTO})
+\end{itemize}
+
+This design allows users to make temporary brightness adjustments (e.g., during a presentation or phone call) without permanently disabling automatic brightness adaptation.
+
+\subsection{Smooth Zone Transitions}
+
+When transitioning between zones, the system ensures smooth brightness changes:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Continuous target:} New zone's curve is evaluated at current lux
+    \item \textbf{Gradual convergence:} Step-based algorithm naturally smooths transition
+    \item \textbf{No abrupt jumps:} Even if target changes significantly, actual brightness changes gradually
+\end{enumerate}
+
+\textbf{Example:} Transitioning from indoor (target: 45\%) to outdoor (target: 70\%):
+\begin{itemize}[leftmargin=*]
+    \item Zone change occurs at lux boundary (e.g., 500 lux)
+    \item Target immediately jumps from 45\% to 70\% (new zone's curve)
+    \item Brightness controller steps from 45\% toward 70\% over ~2--3 seconds
+    \item User experiences smooth brightening, not abrupt jump
+\end{itemize}
+
+\subsection{Error Handling in Control Loop}
+
+The control loop uses simple error handling for robustness:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Sensor read failure:} Skip brightness update for that iteration; sensor re-read on next loop cycle (every \texttt{update\_interval\_ms}, typically 500~ms)
+    \item \textbf{Output write failure:} Individual output implementations (\texttt{ddcutil}, \texttt{dimmer200}, etc.) log errors; loop continues normally with implicit retry on next iteration
+    \item \textbf{Invalid zone (lux out of range):} Use last zone in configuration (typically the highest lux ``outdoor'' zone)
+    \item \textbf{Brightness out of range:} Clamp to [0, 100] in both \texttt{BrightnessController} and output device layers
+\end{itemize}
+
+All errors are logged for diagnostics. The continuous loop structure provides implicit retry behavior---failed operations are reattempted on the next iteration.
+
+\textbf{Current design rationale:} The simple approach avoids complex error state management while providing adequate reliability for IVI use cases. Transient sensor glitches (e.g., I\textsuperscript{2}C bus noise) self-correct within 1--2 loop iterations. Output failures are rare in practice for DDC/CI and I\textsuperscript{2}C devices.
+
+\textbf{Potential enhancements for mission-critical deployments:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Sensor staleness detection (not implemented):}\\
+        Current builds do not enforce \texttt{sensor\_error\_timeout\_sec} / \texttt{fallback\_brightness}; the daemon simply holds the last valid brightness indefinitely when the ALS is silent. Safety-critical adopters must add their own staleness check or watchdog until native support lands.
+    \item \textbf{Exponential backoff:} Reduce sensor poll rate on persistent failures to avoid wasting I/O cycles
+    \item \textbf{Output error detection:} Check \texttt{setBrightness()} return value in main loop; log persistent output failures and trigger alerts
+    \item \textbf{Watchdog integration:} Notify system watchdog on critical failures (e.g., all I/O paths failing)
+\end{itemize}
+
+These enhancements would add complexity and are not required for typical automotive IVI systems where power cycling resolves hardware failures.
+
+\subsection{Performance Considerations}
+
+The control loop is designed for low overhead:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Loop period:} Configurable via \texttt{update\_interval\_ms} (typical: 200--250~ms / 4--5~Hz). This range provides responsive brightness adaptation while maintaining low CPU overhead. Configurable range: 100--10000~ms
+    \item \textbf{Lightweight operations:} Zone selection and brightness calculation use simple floating-point math; no complex algorithms
+    \item \textbf{Non-blocking I/O:} Sensor/output operations use timeouts to prevent blocking
+    \item \textbf{CPU usage:} Typically $<$1\% on modern embedded SoCs (Raspberry Pi 4, automotive IVI platforms)
+\end{itemize}
+
+\subsection{Summary}
+
+The zone controller and brightness control loop integrate all the concepts from Part~I into a production-ready adaptive brightness system:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Zone mapper:} Selects appropriate zone based on lux with optional hysteresis (0--50\%) to prevent oscillation at zone boundaries
+    \item \textbf{Brightness controller:} Calculates target brightness using linear/logarithmic curves and applies asymmetric step-based transitions (brightening 2× faster than dimming for safety)
+    \item \textbf{Mode awareness:} Respects AUTO/MANUAL/MANUAL\_TEMPORARY operating modes with automatic timeout-based resumption
+    \item \textbf{Smooth transitions:} Gradual brightness changes even across zone boundaries, avoiding abrupt jumps
+    \item \textbf{Simple error handling:} Implicit retry through continuous loop structure; adequate for IVI use cases with optional enhancements for mission-critical deployments
+    \item \textbf{Hardware validated:} Asymmetric transitions tested on Raspberry Pi 4 with OPT4001 sensor and DDC/CI monitor, confirming 2.3× slower dimming as designed
+\end{itemize}
+
+The next section details the JSON configuration format that defines zones, sensors, and outputs.

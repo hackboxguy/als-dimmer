@@ -1,0 +1,206 @@
+%------------------------
+% Section 7: System Architecture
+%------------------------
+\section{ALS-Dimmer System Architecture}
+
+Having covered the fundamental principles in Part~I, we now turn to the practical implementation of these concepts in the \textbf{ALS-Dimmer} system. ALS-Dimmer is a Linux-Daemon for adaptive brightness control designed for embedded Linux systems, with particular focus on automotive IVI (In-Vehicle Infotainment) applications.
+
+\subsection{Design Philosophy}
+
+ALS-Dimmer is built on three core principles:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Hardware Agnostic:} Support diverse sensors and outputs through factory pattern with interface-based design
+    \item \textbf{Configuration-Driven:} No code changes required for different hardware setups
+    \item \textbf{Production-Ready:} Robust error handling, logging, systemd integration
+\end{enumerate}
+
+\subsection{High-Level Architecture}
+
+Figure~\ref{fig:architecture} shows the main components and data flow:
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    scale=0.75,
+    every node/.style={transform shape},
+    node distance=1.5cm and 2cm,
+    block/.style={rectangle, draw, fill=blue!10, text width=3.5cm, text centered, rounded corners, minimum height=1.2cm},
+    interface/.style={rectangle, draw, fill=green!10, text width=3cm, text centered, rounded corners, minimum height=1cm},
+    arrow/.style={->, >=stealth, thick}
+]
+    % Sensor layer
+    \node[interface] (sensor) {Sensor Interface};
+    \node[below=0.3cm of sensor, font=\footnotesize] (sensor_impl) {OPT4001, CAN ALS, File};
+
+    % Zone mapper
+    \node[block, right=of sensor] (zonemapper) {Zone Mapper};
+    \node[below=0.2cm of zonemapper, font=\footnotesize, text width=3.5cm, align=center] {Selects zone based on\\ambient lux reading};
+
+    % Brightness controller
+    \node[block, right=of zonemapper] (controller) {Brightness Controller};
+    \node[below=0.2cm of controller, font=\footnotesize, text width=4.0cm, align=center] {Calculates target,\\applies asymmetric transitions};
+
+    % Output layer
+    \node[interface, right=of controller] (output) {Output Interface};
+    \node[below=0.3cm of output, font=\footnotesize] (output_impl) {DDC/CI, I2C, CAN, File};
+
+    % JSON config (top)
+    \node[block, above=1.5cm of zonemapper, fill=yellow!10] (config) {JSON Configuration};
+    \node[below=0.2cm of config, font=\footnotesize, text width=4.0cm, align=center] {Defines sensors, outputs,\\zones, curves, timing};
+
+    % Control interface (bottom)
+    \node[block, below=1.5cm of controller, fill=orange!10] (control) {Control Interface};
+    \node[below=0.2cm of control, font=\footnotesize, text width=3.5cm, align=center] {TCP/Unix socket\\for runtime control};
+
+    % Arrows - main data flow
+    \draw[arrow] (sensor) -- node[above, font=\footnotesize] {Lux} (zonemapper);
+    \draw[arrow] (zonemapper) -- node[above, font=\footnotesize] {Zone} (controller);
+    \draw[arrow] (controller) -- node[above, font=\footnotesize] {Brightness} (output);
+
+    % Config arrows
+    \draw[arrow, dashed] (config) -- (zonemapper);
+    \draw[arrow, dashed] (config) -| (sensor);
+    \draw[arrow, dashed] (config) -| (output);
+
+    % Control arrows
+    \draw[arrow, dashed, <->] (control) -- (controller);
+
+\end{tikzpicture}
+\caption{ALS-Dimmer High-Level Architecture}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Core Components}
+
+\subsubsection{Sensor Interface Layer}
+
+Abstracts ambient light sensor hardware. Implementations include:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{OPT4001:} TI OPT4001 high-precision I2C sensor (automotive-grade)
+    \item \textbf{FPGA-OPT4001:} OPT4001 connected via FPGA I2C bridge
+    \item \textbf{CAN ALS:} Sensor data via CAN bus (common in automotive)
+    \item \textbf{File Sensor:} Reads lux from file (testing, simulation, integration with external systems)
+\end{itemize}
+
+All implementations conform to a common \texttt{SensorInterface} API, allowing hot-swapping via configuration.
+
+\subsubsection{Zone Mapper}
+
+Implements the zone-based mapping strategy described in Section~2.4. Responsibilities:
+\begin{itemize}[leftmargin=*]
+    \item Monitor current ambient lux reading
+    \item Select appropriate zone based on lux boundaries
+    \item Apply hysteresis to prevent oscillation
+    \item Notify brightness controller of zone changes
+\end{itemize}
+
+Zones are fully configurable in JSON, including boundaries, curve types, and brightness ranges.
+
+\subsubsection{Brightness Controller}
+
+Core brightness calculation and transition control logic. Responsibilities:
+\begin{itemize}[leftmargin=*]
+    \item Calculate target brightness using zone's curve formula
+    \item Implement asymmetric error-based step sizing (Section~2.6)
+    \item Track current vs. target brightness
+    \item Apply rate limiting and smoothing
+    \item Handle manual overrides and modes
+\end{itemize}
+
+The controller runs in a control loop (typically 100--200 ms period) continuously updating brightness.
+
+\subsubsection{Output Interface Layer}
+
+Abstracts display brightness control hardware. Implementations include:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{DDC/CI:} Control Display brightness via DDC/CI protocol (VESA standard)
+    \item \textbf{I2C Dimmer:} Direct control of LED Driver ICs (e.g FPGA or TCON)
+    \item \textbf{CAN Output:} Broadcast brightness via CAN bus to te CAN based Remote Display
+    \item \textbf{File Output:} Write brightness to file (testing, integration with external systems)
+\end{itemize}
+
+Like sensors, all outputs conform to a common \texttt{OutputInterface} API.
+
+\subsection{Operating Modes}
+
+ALS-Dimmer supports three operating modes:
+
+\begin{table}[h]
+\centering
+\caption{ALS-Dimmer Operating Modes}
+\label{tab:operating_modes}
+\small
+\begin{tabular}{@{}llp{0.42\textwidth}@{}}
+\toprule
+\textbf{Mode} & \textbf{Trigger} & \textbf{Behavior} \\
+\midrule
+AUTO & Default startup & Fully automatic control based on ALS and zones \\
+MANUAL & User override via control interface & Brightness fixed at user-specified value. ALS monitoring continues but brightness not updated. \\
+MANUAL\_TEMPORARY & User adjustment in AUTO mode & Like MANUAL but reverts to AUTO after timeout (configurable, typically 30--60s). Allows temporary user adjustments without disabling ALS. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Rationale for MANUAL\_TEMPORARY:} Users may want to temporarily adjust brightness (e.g., reading a map in bright sun) without permanently disabling adaptive control. After a timeout, the system resumes automatic operation. \\
+\textbf{Note:} MANUAL\_TEMPORARY mode is a read-only status flag, which reflects a temprory transition phase - it cannot be set through external tcp or unix-domain sockets.
+
+\subsection{Daemon Architecture}
+
+ALS-Dimmer runs as a Linux daemon with the following characteristics:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Single-threaded event loop:} Simplifies concurrency, reduces bugs
+    \item \textbf{Systemd integration:} Can be managed via \texttt{systemctl} (start, stop, restart)
+    \item \textbf{Structured logging:} Configurable log levels (trace, debug, info, warn, error)
+    \item \textbf{Graceful shutdown:} Handles SIGINT/SIGTERM cleanly, saves state if needed
+    \item \textbf{Hot configuration reload:} For Future extension (currently requires restart)
+\end{itemize}
+
+\subsection{Key Design Decisions}
+
+\subsubsection{Why JSON Configuration?}
+
+JSON was chosen over compiled configuration for several reasons:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{No recompilation:} Hardware changes require only config file edits
+    \item \textbf{Tooling:} JSON parsers widely available, easy to validate
+    \item \textbf{Human-readable:} Engineers can understand and modify configs
+    \item \textbf{Integration:} Easy to generate configs from build systems, provisioning tools
+\end{itemize}
+
+\subsubsection{Why Factory Pattern with Interfaces?}
+
+The interface-based factory pattern provides:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Modularity:} New sensors/outputs added without touching core logic
+    \item \textbf{Testing:} File-based sensors/outputs enable automated testing
+    \item \textbf{Portability:} Same core daemon runs on different hardware platforms
+    \item \textbf{Maintainability:} Clear separation of concerns
+\end{itemize}
+
+\subsubsection{Why Linux Daemon?}
+
+Targeting embedded Linux (especially automotive IVI) drives the daemon architecture:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{System service:} Runs continuously in background, starts at boot
+    \item \textbf{Resource efficient:} Single-threaded, low CPU/memory footprint
+    \item \textbf{Standard integration:} Works with systemd, journald, syslog
+    \item \textbf{IPC-ready:} Unix Socket Control interface allows integration with HMI frameworks (Android, QNX, etc.)
+\end{itemize}
+
+\subsection{Summary}
+
+ALS-Dimmer's architecture embodies the principles described in Part~I through a modular, configuration-driven design. Key strengths:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Hardware agnostic:} Supports diverse sensors and outputs
+    \item \textbf{Configurable:} Zones, curves, timing all defined in JSON
+    \item \textbf{Production-ready:} Systemd integration, robust error handling
+    \item \textbf{Testable:} File-based interfaces enable simulation and CI/CD
+\end{itemize}
+
+The next sections detail the implementation of each component.

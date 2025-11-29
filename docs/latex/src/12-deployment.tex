@@ -1,0 +1,371 @@
+%------------------------
+% Section 12: Deployment and System Integration
+%------------------------
+\section{Building, Installing, and Deploying ALS-Dimmer}
+
+This section covers building the daemon from source, installing it on target systems, and integrating it with systemd for production deployment.
+
+\subsection{Build System: CMake}
+
+ALS-Dimmer uses CMake for cross-platform builds.
+
+\subsubsection{Dependencies}
+
+\textbf{Required:}
+\begin{itemize}[leftmargin=*]
+    \item C++17 compiler (GCC 7+, Clang 5+)
+    \item CMake 3.12 or later
+    \item nlohmann/json (JSON parsing library)
+    \item spdlog (logging library)
+\end{itemize}
+
+\textbf{Optional (hardware-specific):}
+\begin{itemize}[leftmargin=*]
+    \item libi2c-dev (for I2C sensors/outputs)
+    \item libsocketcan (for CAN interfaces)
+\end{itemize}
+
+\subsubsection{Building from Source}
+
+\begin{lstlisting}[language=bash, caption={Standard CMake Build}]
+# Clone repository
+git clone https://github.com/your-org/als-dimmer.git
+cd als-dimmer
+
+# Create build directory
+mkdir build && cd build
+
+# Configure build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# Build
+make -j$(nproc)
+
+# Optional: Run tests
+make test
+\end{lstlisting}
+
+\textbf{Build output:} Executable at \texttt{build/als-dimmer}
+
+\subsubsection{Cross-Compilation for Embedded Targets}
+
+\textbf{Example: ARM64 Yocto-based Linux}
+
+\begin{lstlisting}[language=bash, caption={Cross-Compilation with Yocto SDK}]
+# Source Yocto SDK environment
+source /opt/poky/3.1/environment-setup-aarch64-poky-linux
+
+# Configure for cross-compilation
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=toolchain-yocto-arm64.cmake \
+      ..
+
+# Build
+make -j$(nproc)
+\end{lstlisting}
+
+\textbf{Example: Custom ARM toolchain}
+
+\begin{lstlisting}[language=bash, caption={Cross-Compilation with Custom Toolchain}]
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc \
+      -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ \
+      ..
+\end{lstlisting}
+
+\subsubsection{CMake Build Options}
+
+\begin{table}[h]
+\centering
+\caption{CMake Configuration Options}
+\label{tab:cmake_options}
+\begin{tabular}{@{}llp{0.4\textwidth}@{}}
+\toprule
+\textbf{Option} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\texttt{CMAKE\_BUILD\_TYPE} & Release & Build type: Debug, Release, RelWithDebInfo \\
+\texttt{ENABLE\_TESTING} & ON & Build unit tests \\
+\texttt{ENABLE\_OPT4001} & ON & Include OPT4001 sensor support \\
+\texttt{ENABLE\_CAN} & ON & Include CAN bus support \\
+\texttt{ENABLE\_DDCCI} & ON & Include DDC/CI output support \\
+\texttt{INSTALL\_SYSTEMD} & ON & Install systemd service file \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Example: Minimal build without CAN}
+
+\begin{lstlisting}[language=bash]
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_CAN=OFF \
+      ..
+\end{lstlisting}
+
+\subsection{Installation}
+
+\subsubsection{System Installation}
+
+\begin{lstlisting}[language=bash, caption={Install to System Directories}]
+# Install binary, config, and systemd service
+sudo make install
+
+# Default installation paths:
+# /usr/local/bin/als-dimmer            (executable)
+# /etc/als-dimmer/config.json          (example config)
+# /etc/systemd/system/als-dimmer.service  (systemd unit)
+\end{lstlisting}
+
+\subsubsection{Custom Installation Prefix}
+
+\begin{lstlisting}[language=bash, caption={Install to Custom Location}]
+cmake -DCMAKE_INSTALL_PREFIX=/opt/user ..
+make
+sudo make install
+
+# Installs to:
+# /opt/user/bin/als-dimmer
+# /opt/user/etc/als-dimmer/config.json
+\end{lstlisting}
+
+\subsection{Systemd Service Integration}
+
+\subsubsection{Service Unit File}
+
+ALS-Dimmer includes a systemd service file for automatic startup:
+
+\begin{lstlisting}[caption={/etc/systemd/system/als-dimmer.service}, basicstyle=\ttfamily\scriptsize]
+[Unit]
+Description=ALS-Dimmer Adaptive Brightness Control Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/als-dimmer \
+          --config /etc/als-dimmer/config.json \
+          --log-level info
+Restart=on-failure
+RestartSec=5
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+\end{lstlisting}
+
+\subsubsection{Service Management Commands}
+
+\begin{lstlisting}[language=bash, caption={Systemd Service Control}]
+# Enable service (start at boot)
+sudo systemctl enable als-dimmer
+
+# Start service immediately
+sudo systemctl start als-dimmer
+
+# Check service status
+sudo systemctl status als-dimmer
+
+# View logs
+sudo journalctl -u als-dimmer -f
+
+# Restart after config changes
+sudo systemctl restart als-dimmer
+
+# Stop service
+sudo systemctl stop als-dimmer
+
+# Disable service (don't start at boot)
+sudo systemctl disable als-dimmer
+\end{lstlisting}
+
+\subsection{Configuration Deployment}
+
+\subsubsection{Config File Location}
+
+The daemon expects configuration at \texttt{/etc/als-dimmer/config.json} by default, but this can be overridden via command-line argument:
+
+\begin{lstlisting}[language=bash]
+als-dimmer --config /path/to/custom/config.json
+\end{lstlisting}
+
+\subsubsection{Deploying Configurations}
+
+\textbf{Approach 1: Manual deployment}
+
+\begin{lstlisting}[language=bash]
+sudo mkdir -p /etc/als-dimmer
+sudo cp my-automotive-config.json /etc/als-dimmer/config.json
+sudo systemctl restart als-dimmer
+\end{lstlisting}
+
+\textbf{Approach 2: Yocto recipe}
+
+For Yocto-based builds, include config in recipe:
+
+\begin{lstlisting}[caption={als-dimmer.bb (Yocto Recipe Snippet)}, basicstyle=\ttfamily\scriptsize]
+do_install_append() {
+    install -d ${D}${sysconfdir}/als-dimmer
+    install -m 0644 ${WORKDIR}/automotive-config.json \
+        ${D}${sysconfdir}/als-dimmer/config.json
+}
+\end{lstlisting}
+
+\subsection{Runtime Control and Debugging}
+
+\subsubsection{Command-Line Arguments}
+
+\begin{table}[h]
+\centering
+\caption{Command-Line Arguments}
+\label{tab:cli_args}
+\begin{tabular}{@{}llp{0.42\textwidth}@{}}
+\toprule
+\textbf{Argument} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\texttt{--config FILE} & (required) & Path to JSON configuration file \\
+\texttt{--log-level LEVEL} & info & Log level: trace, debug, info, warn, error \\
+\texttt{--foreground} & (off) & Run in foreground (don't daemonize) \\
+\texttt{--help} & - & Show help message and exit \\
+\texttt{--version} & - & Show version and exit \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Debugging in Foreground}
+
+For development and debugging, run in foreground with verbose logging:
+
+\begin{lstlisting}[language=bash, caption={Run in Foreground with Debug Logging}]
+./als-dimmer --config /etc/als-dimmer/config.json \
+             --log-level debug \
+             --foreground
+\end{lstlisting}
+
+This outputs logs directly to terminal, useful for troubleshooting sensor/output issues.
+
+\subsubsection{Inspecting Logs}
+
+\begin{lstlisting}[language=bash, caption={View Systemd Journal Logs}]
+# View recent logs
+sudo journalctl -u als-dimmer --since "10 minutes ago"
+
+# Follow logs in real-time
+sudo journalctl -u als-dimmer -f
+
+# Filter by log level
+sudo journalctl -u als-dimmer -p warning
+\end{lstlisting}
+
+\subsection{Android IVI Integration}
+
+For Android-based IVI systems, ALS-Dimmer typically runs as a native daemon alongside the Android framework.
+
+\subsubsection{Integration Steps}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Build:} Cross-compile for Android target (ARM/ARM64)
+    \item \textbf{Install:} Place binary in \texttt{/system/bin/} or \texttt{/vendor/bin/}
+    \item \textbf{Init script:} Add entry to \texttt{init.rc} to start daemon at boot
+    \item \textbf{SELinux policy:} Grant permissions for I2C, CAN, socket access
+    \item \textbf{HMI integration:} Android app communicates via Unix socket
+\end{enumerate}
+
+\textbf{Example init.rc entry:}
+
+\begin{lstlisting}[caption={init.rc Entry for Android}]
+service als-dimmer /vendor/bin/als-dimmer \
+    --config /vendor/etc/als-dimmer/config.json \
+    --log-level info
+    class main
+    user root
+    group system
+    oneshot
+\end{lstlisting}
+
+\subsection{Validation and Testing}
+
+\subsubsection{Manual Testing Procedure}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Verify service is running:}
+    \begin{lstlisting}[language=bash]
+sudo systemctl status als-dimmer
+    \end{lstlisting}
+
+    \item \textbf{Query status via control interface:}
+    \begin{lstlisting}[language=bash]
+echo '{"version":"1.0","command":"get_status"}' | \
+    nc -U /tmp/als-dimmer.sock
+    \end{lstlisting}
+
+    \item \textbf{Test manual brightness control:}
+    \begin{lstlisting}[language=bash]
+echo '{"version":"1.0","command":"set_brightness",
+      "params":{"brightness":50}}' | \
+    nc -U /tmp/als-dimmer.sock
+    \end{lstlisting}
+
+    \item \textbf{Monitor logs:}
+    \begin{lstlisting}[language=bash]
+sudo journalctl -u als-dimmer -f
+    \end{lstlisting}
+
+    \item \textbf{Simulate lux changes} (if using file sensor):
+    \begin{lstlisting}[language=bash]
+echo "100.0" > /tmp/ambient_lux.txt
+echo "1000.0" > /tmp/ambient_lux.txt
+    \end{lstlisting}
+
+    \item \textbf{Verify brightness changes:}
+    \begin{lstlisting}[language=bash]
+watch -n 1 'echo "{\"version\":\"1.0\",
+    \"command\":\"get_status\"}" | nc -U /tmp/als-dimmer.sock'
+    \end{lstlisting}
+\end{enumerate}
+
+\subsubsection{Automated Testing}
+
+Unit tests verify zone mapping, curve calculations, and transition logic:
+
+\begin{lstlisting}[language=bash]
+# Build and run tests
+cmake -DENABLE_TESTING=ON ..
+make
+make test
+
+# Alternatively, run with verbose output
+ctest --verbose
+\end{lstlisting}
+
+\subsection{Troubleshooting Common Issues}
+
+\begin{table}[h]
+\centering
+\caption{Common Deployment Issues}
+\label{tab:troubleshooting}
+\begin{tabular}{@{}p{0.28\textwidth}p{0.62\textwidth}@{}}
+\toprule
+\textbf{Issue} & \textbf{Solution} \\
+\midrule
+Service fails to start & Check logs (\texttt{journalctl -u als-dimmer}). Verify config file path and permissions. \\
+Sensor initialization fails & Verify I2C/CAN device permissions. Run as root or add user to appropriate groups. \\
+Brightness not changing & Check output device permissions. Verify sensor is operational (\texttt{get\_status} command). \\
+High CPU usage & Increase \texttt{loop\_period\_ms} (longer interval) or raise \texttt{update\_interval\_ms} to reduce control-loop frequency; also check for sensor read errors. \\
+Socket connection refused & Verify socket path. Check if daemon is running. Ensure Unix socket has correct permissions. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Summary}
+
+Deploying ALS-Dimmer involves:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Building:} CMake-based build system, supports cross-compilation
+    \item \textbf{Installing:} Standard Linux paths, systemd integration
+    \item \textbf{Configuring:} JSON config deployed to \texttt{/etc/als-dimmer/}
+    \item \textbf{Testing:} Manual testing via control interface, automated unit tests
+    \item \textbf{Monitoring:} Systemd journal for logs, status queries for runtime state
+\end{itemize}
+
+The next section concludes the document with a summary and recommendations.

@@ -1,0 +1,143 @@
+\section{Ambient Light Environments}
+
+\subsection{Understanding Lux}
+
+\textbf{Lux} (symbol: lx) is the SI unit of illuminance, measuring the amount of luminous flux incident on a surface per unit area. Formally:
+
+\begin{equation}
+\text{1 lux} = \frac{1 \text{ lumen}}{\text{m}^2}
+\label{eq:lux_definition}
+\end{equation}
+
+For practical display engineering, lux can be understood as the \textbf{brightness of the environment} as perceived by a light sensor at the display location. Modern ambient light sensors (like TI OPT4001, Vishay VEML7700) provide direct lux readings with minimal calibration.
+
+\subsection{Typical Lux Ranges}
+
+Understanding real-world illuminance levels is essential for designing effective adaptive brightness algorithms. Table \ref{tab:lux_ranges} summarizes typical lux values across home and automotive environments.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{|l|r|p{0.45\textwidth}|}
+\hline
+\textbf{Environment} & \textbf{Lux Range} & \textbf{Notes} \\
+\hline
+\multicolumn{3}{|c|}{\textbf{Home / Office}} \\
+\hline
+Dark room at night & 0.1 -- 10 & Moonlight through window, night light \\
+\hline
+Ambient lighting & 50 -- 150 & Living room, soft lighting \\
+\hline
+Task lighting & 300 -- 500 & Reading lamp, workspace \\
+\hline
+Bright office & 500 -- 1000 & Well-lit workspace, fluorescent lighting \\
+\hline
+\multicolumn{3}{|c|}{\textbf{Automotive}} \\
+\hline
+Night driving & 0.1 -- 10 & Dashboard + distant streetlights \\
+\hline
+Parking garage & 10 -- 100 & Artificial lighting, variable quality \\
+\hline
+Tunnel & 50 -- 500 & Varies by depth/length, rapid transitions \\
+\hline
+Tree cover / shadows & 500 -- 5000 & Dappled sunlight, highly variable \\
+\hline
+Overcast day & 1,000 -- 10,000 & Diffuse skylight \\
+\hline
+Direct sunlight & 10,000 -- 100,000+ & Windshield facing sun, sensor placement critical \\
+\hline
+\end{tabular}
+\caption{Typical lux ranges in home and automotive environments}
+\label{tab:lux_ranges}
+\end{table}
+
+\subsection{Dynamic Range Challenge}
+
+The most challenging aspect of automotive adaptive brightness is the \textbf{extreme dynamic range}:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Night driving} (1 lux) to \textbf{direct sunlight} (100,000 lux) = \textbf{100,000:1 ratio}
+    \item \textbf{Six orders of magnitude} span requires sophisticated algorithms
+    \item \textbf{Rapid transitions} (e.g., tunnel entry/exit) require sub-second response
+\end{itemize}
+
+Figure \ref{fig:lux_ranges} visualizes these ranges on a logarithmic scale, illustrating why a single linear mapping cannot provide optimal brightness across all conditions.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[scale=0.9]
+    % Logarithmic scale from 0.1 to 100000 lux
+    \foreach \x/\label in {0/0.1, 1/1, 2/10, 3/100, 4/1K, 5/10K, 6/100K} {
+        \draw (\x*2,0) -- (\x*2,0.2);
+        \node at (\x*2,-0.4) {\small \label};
+    }
+    \draw[thick,->] (0,0) -- (12.5,0) node[right] {\small Lux (log scale)};
+
+    % Vertical gridlines (light gray) for easier alignment
+    \foreach \x in {0,1,2,3,4,5,6} {
+        \draw[gray!65, very thin] (\x*2,0) -- (\x*2,11.5);
+    }
+
+    % Home environments
+    % Dark room (0.1-10 lux: x=0 to x=4)
+    \fill[nightzone,opacity=0.6] (0,1) rectangle (4,1.5);
+    \node[right] at (4.1,1.25) {\footnotesize Dark room};
+
+    % Ambient lighting (50-150 lux: x≈5.4 to x≈6.4)
+    \fill[indoorzone,opacity=0.6] (5.4,2) rectangle (6.4,2.5);
+    \node[right] at (6.5,2.25) {\footnotesize Ambient light};
+
+    % Task lighting (300-500 lux: x≈7.0 to x≈7.4)
+    \fill[indoorzone,opacity=0.6] (7.0,3) rectangle (7.4,3.5);
+    \node[right] at (7.5,3.25) {\footnotesize Task lighting};
+
+    % Bright office (500-1000 lux: x≈7.4 to x=8)
+    \fill[outdoorzone,opacity=0.5] (7.4,4) rectangle (8,4.5);
+    \node[right] at (8.1,4.25) {\footnotesize Bright office};
+
+    % Automotive environments
+    % Night driving (0.1-10 lux: x=0 to x=4)
+    \fill[nightzone,opacity=0.6] (0,5.5) rectangle (4,6);
+    \node[right] at (4.1,5.75) {\footnotesize Night driving};
+
+    % Parking garage (10-100 lux: x=4 to x=6)
+    \fill[nightzone,opacity=0.6] (4,6.5) rectangle (6,7);
+    \node[right] at (6.1,6.75) {\footnotesize Parking garage};
+
+    % Tunnel (50-500 lux: x≈5.4 to x≈7.4)
+    \fill[indoorzone,opacity=0.6] (5.4,7.5) rectangle (7.4,8);
+    \node[right] at (7.5,7.75) {\footnotesize Tunnel};
+
+    % Tree cover (500-5000 lux: x≈7.4 to x≈9.4)
+    \fill[outdoorzone,opacity=0.5] (7.4,8.5) rectangle (9.4,9);
+    \node[right] at (9.5,8.75) {\footnotesize Tree cover};
+
+    % Overcast day (1000-10000 lux: x=8 to x=10)
+    \fill[outdoorzone,opacity=0.5] (8,9.5) rectangle (10,10);
+    \node[right] at (10.1,9.75) {\footnotesize Overcast day};
+
+    % Direct sunlight (10000-100000 lux: x=10 to x=12)
+    \fill[outdoorzone,opacity=0.5] (10,10.5) rectangle (12,11);
+    \node[right] at (12.1,10.75) {\footnotesize Direct sunlight};
+    
+    % Labels
+    \node[left] at (-0.2,2.5) {\textbf{Home}};
+    \node[left] at (-0.2,8) {\textbf{Auto}};
+    
+\end{tikzpicture}
+\caption{Lux ranges visualization (logarithmic scale)}
+\label{fig:lux_ranges}
+\end{figure}
+
+\subsection{Implications for Display Design}
+
+These environmental constraints drive several key design requirements:
+
+\begin{enumerate}
+    \item \textbf{Sensor placement} must avoid direct light sources while capturing ambient conditions
+    \item \textbf{Brightness range} must span from dim (to avoid glare) to maximum panel capability
+    \item \textbf{Transition speed} must be asymmetric (fast increase, slow decrease)
+    \item \textbf{Zone-based mapping} is essential due to non-linear human perception
+\end{enumerate}
+
+The following sections explore the human visual system's response to these conditions and derive optimal control strategies.

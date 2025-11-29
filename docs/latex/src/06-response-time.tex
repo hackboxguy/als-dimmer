@@ -1,0 +1,418 @@
+%------------------------
+% Section 6: Response Time and Transition Control
+%------------------------
+\section{Asymmetric Response Time Design}
+
+Calculating the \emph{target} brightness is only half the problem. The other half is determining \emph{how quickly} to transition from the current brightness to the target. This section explains why response speed matters and how asymmetric transition times improve user experience.
+
+\subsection{Why Response Speed Matters}
+
+Instantaneous brightness changes are jarring and uncomfortable. Consider a driver entering a tunnel: if the display instantly jumps from 80\% to 20\% brightness, it creates visual shock and distraction. Conversely, gradual changes can be imperceptibly slow, causing the user to manually intervene.
+
+The ideal transition speed depends on:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Magnitude of change:} Larger changes tolerate faster transitions
+    \item \textbf{Direction of change:} Brightening vs. dimming (asymmetric)
+    \item \textbf{Human adaptation physiology:} Pupil response time, photochemical processes
+    \item \textbf{Application context:} Safety-critical (automotive) vs. comfort (home)
+\end{itemize}
+
+\subsection{Asymmetric Adaptation: Dark $\rightarrow$ Bright vs. Bright $\rightarrow$ Dark}
+
+Recall from Section~3.3 that human visual adaptation is highly \textbf{asymmetric}:
+
+\begin{table}[h]
+\centering
+\caption{Asymmetric Transition Time Guidelines}
+\label{tab:asymmetric_times}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Transition} & \textbf{Pupil Response} & \textbf{Full Adaptation} & \textbf{Recommended Display Speed} \\
+\midrule
+Dark $\rightarrow$ Bright & 100--500 ms & 1--5 minutes & Fast (200--800 ms) \\
+Bright $\rightarrow$ Dark & 100--500 ms & 2--30 minutes & Slow (1--4 seconds) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key principle:} Match display transition speed to human adaptation capability.
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Brightening (dark $\rightarrow$ bright):} Fast transitions are acceptable because:
+        \begin{itemize}
+            \item Pupils constrict quickly (100--500 ms)
+            \item No photochemical delay (cones already active)
+            \item Users expect immediate response when more light is available
+        \end{itemize}
+    \item \textbf{Dimming (bright $\rightarrow$ dark):} Slow transitions are preferred because:
+        \begin{itemize}
+            \item Photochemical adaptation is slow (minutes to fully adapt)
+            \item Premature dimming strains users trying to read the display
+            \item Gradual dimming goes unnoticed (comfortable)
+        \end{itemize}
+\end{itemize}
+
+\subsection{Three-Tier Threshold Algorithm}
+
+The ALS-Dimmer system uses a \textbf{three-tier threshold-based step sizing} algorithm. Rather than calculating steps proportional to error, this approach selects from three fixed step sizes based on error magnitude ranges. This provides precise per-zone control while guaranteeing predictable settling behavior.
+
+\subsubsection{Algorithm Overview}
+
+Define:
+\begin{itemize}[leftmargin=*]
+    \item $B_{current}$ = Current display brightness (\%)
+    \item $B_{target}$ = Target brightness from curve (\%)
+    \item $e$ = Error = $B_{target} - B_{current}$
+    \item $\Delta B$ = Brightness step size per iteration
+    \item $T_{large}$ = Large error threshold (\%)
+    \item $T_{small}$ = Small error threshold (\%)
+\end{itemize}
+
+\subsubsection{Step Size Selection Logic}
+
+The system maintains \textbf{six asymmetric step sizes per zone}:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Large steps:} $\Delta B_{large\text{-}up}$ (brightening), $\Delta B_{large\text{-}down}$ (dimming)
+    \item \textbf{Medium steps:} $\Delta B_{medium\text{-}up}$ (brightening), $\Delta B_{medium\text{-}down}$ (dimming)
+    \item \textbf{Small steps:} $\Delta B_{small\text{-}up}$ (brightening), $\Delta B_{small\text{-}down}$ (dimming)
+\end{itemize}
+
+\begin{equation}
+\Delta B =
+\begin{cases}
+\Delta B_{large\text{-}up} & \text{if } e > T_{large} \text{ (large brightening)} \\
+\Delta B_{medium\text{-}up} & \text{if } T_{small} < e \leq T_{large} \text{ (medium brightening)} \\
+\Delta B_{small\text{-}up} & \text{if } 0 < e \leq T_{small} \text{ (small brightening)} \\
+0 & \text{if } e = 0 \text{ (at target)} \\
+-\Delta B_{small\text{-}down} & \text{if } -T_{small} \leq e < 0 \text{ (small dimming)} \\
+-\Delta B_{medium\text{-}down} & \text{if } -T_{large} \leq e < -T_{small} \text{ (medium dimming)} \\
+-\Delta B_{large\text{-}down} & \text{if } e < -T_{large} \text{ (large dimming)}
+\end{cases}
+\label{eq:step_size_threshold}
+\end{equation}
+
+\textbf{Key principle:} Dimming steps are typically 50\% smaller than brightening steps for the same magnitude category, implementing the asymmetric adaptation principle.
+
+\subsubsection{Typical Default Parameters}
+
+\begin{table}[h]
+\centering
+\caption{Default Threshold-Based Step Sizes}
+\label{tab:default_steps}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Category} & \textbf{Error Threshold} & \textbf{Brightening Step} & \textbf{Dimming Step} \\
+\midrule
+Large   & $|e| > 20\%$ & 6\%  & 3\% \\
+Medium  & $5\% < |e| \leq 20\%$ & 3\%  & 1.5\% (rounded to 2\%) \\
+Small   & $|e| \leq 5\%$ & 1\%  & 1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Example: Brightening Transition}
+
+\textbf{Scenario:} Display at 20\%, target jumps to 60\% (entering sunlight).
+
+\textbf{Parameters:} $T_{large} = 20\%$, $T_{small} = 5\%$, $\Delta B_{large\text{-}up} = 6\%$, $\Delta B_{medium\text{-}up} = 3\%$, $\Delta B_{small\text{-}up} = 1\%$. Iteration period = 100 ms.
+
+\begin{align*}
+\text{Iteration 1:} \quad e &= 60 - 20 = 40\% \quad (> T_{large}) \\
+\Delta B &= 6\% \\
+B_{new} &= 20 + 6 = 26\% \\[0.5em]
+\text{Iteration 2:} \quad e &= 60 - 26 = 34\% \quad (> T_{large}) \\
+\Delta B &= 6\% \\
+B_{new} &= 26 + 6 = 32\% \\[0.5em]
+\text{Iteration 3-5:} \quad & \text{Continue with 6\% steps} \\
+B_{new} &= 38\%, 44\%, 50\% \\[0.5em]
+\text{Iteration 6:} \quad e &= 60 - 50 = 10\% \quad (T_{small} < e \leq T_{large}) \\
+\Delta B &= 3\% \\
+B_{new} &= 50 + 3 = 53\% \\[0.5em]
+\text{Iterations 7-8:} \quad & \text{Continue with 3\% steps} \\
+B_{new} &= 56\%, 59\% \\[0.5em]
+\text{Iteration 9:} \quad e &= 60 - 59 = 1\% \quad (\leq T_{small}) \\
+\Delta B &= 1\% \\
+B_{new} &= 60\%
+\end{align*}
+
+Total time: 9 iterations $\times$ 100 ms = \textbf{900 ms}. The display reaches the target in under 1 second with predictable, smooth steps.
+
+\subsubsection{Example: Dimming Transition}
+
+\textbf{Scenario:} Display at 60\%, target drops to 20\% (entering tunnel).
+
+\textbf{Parameters:} Same thresholds, $\Delta B_{large\text{-}down} = 3\%$, $\Delta B_{medium\text{-}down} = 2\%$, $\Delta B_{small\text{-}down} = 1\%$. Iteration period = 100 ms.
+
+\begin{align*}
+\text{Iteration 1:} \quad e &= 20 - 60 = -40\% \quad (< -T_{large}) \\
+\Delta B &= -3\% \\
+B_{new} &= 60 - 3 = 57\% \\[0.5em]
+\text{Iterations 2-10:} \quad & \text{Continue with 3\% steps (error remains } > T_{large}\text{)} \\
+B_{new} &= 54\%, 51\%, \ldots, 30\% \\[0.5em]
+\text{Iteration 11:} \quad e &= 20 - 30 = -10\% \quad (-T_{large} \leq e < -T_{small}) \\
+\Delta B &= -2\% \\
+B_{new} &= 30 - 2 = 28\% \\[0.5em]
+\text{Iterations 12-15:} \quad & \text{Continue with 2\% steps} \\
+B_{new} &= 26\%, 24\%, 22\%, 20\%
+\end{align*}
+
+Total time: 15 iterations $\times$ 100 ms = \textbf{1.5 seconds}. The slower dimming (compared to 900 ms brightening) allows comfortable visual adaptation.
+
+\subsection{Benefits of Threshold-Based Approach}
+
+The three-tier threshold system provides several advantages for zone-based adaptive brightness:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Per-zone customization:} Each zone can define radically different step sizes (e.g., night zone: 1\%/2\%/3\%, outdoor zone: 5\%/8\%/12\%)
+    \item \textbf{Predictable settling:} Fixed steps guarantee reaching the target without endless micro-adjustments
+    \item \textbf{Safety constraints:} Easy to enforce ``never exceed $X\%$ per step'' limits per zone
+    \item \textbf{Computational efficiency:} Simple integer comparisons and additions (no floating-point multiplications)
+    \item \textbf{Tuning intuitiveness:} Configuration parameters directly correspond to observable behavior
+\end{itemize}
+
+\subsection{Alternative: Proportional Error-Based Algorithm}
+
+An alternative approach used in simpler single-zone systems is \textbf{proportional error-based step sizing}:
+
+\begin{equation}
+\Delta B =
+\begin{cases}
+k_{up} \cdot |e| & \text{if } e > 0 \text{ (brightening)} \\
+k_{down} \cdot |e| & \text{if } e < 0 \text{ (dimming)} \\
+0 & \text{if } e = 0 \text{ (at target)}
+\end{cases}
+\label{eq:proportional_algorithm}
+\end{equation}
+
+Where $k_{up}$ and $k_{down}$ are gain factors (e.g., $k_{up} = 0.25$, $k_{down} = 0.10$).
+
+\textbf{Advantages:} Fewer tuning parameters, mathematically elegant exponential convergence.
+
+\textbf{Disadvantages:} Produces tiny imperceptible steps near convergence (requiring minimum step thresholds), harder to guarantee per-zone maximum step constraints, and less intuitive for zone-specific customization.
+
+For zone-based systems with diverse lighting conditions, the threshold approach provides superior control and predictability.
+
+\subsection{Transition Timing Comparison}
+
+Figure~\ref{fig:transition_timing} illustrates the difference between fast brightening and slow dimming for the same magnitude change.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[scale=0.9]
+    % Brightening plot (left)
+    \begin{scope}
+        \draw[->] (0,0) -- (4,0) node[right, font=\footnotesize] {Time (s)};
+        \draw[->] (0,0) -- (0,3) node[above, font=\footnotesize] {Brightness};
+        \draw (2,-0.9) node[font=\small] {Brightening (Fast)};
+
+        % Fast exponential curve
+        \draw[nightzone, very thick, domain=0:3.5, samples=50]
+            plot (\x, {2.5 * (1 - exp(-3*\x))});
+
+        % Target line
+        \draw[dashed, gray] (0,2.5) -- (4,2.5) node[right, font=\footnotesize] {Target};
+
+        % Time markers
+        \draw (0.8,0.1) -- (0.8,-0.1) node[below, font=\footnotesize] {0.8s};
+    \end{scope}
+
+    % Dimming plot (right)
+    \begin{scope}[xshift=6cm]
+        \draw[->] (0,0) -- (3.5,0) node[right, font=\footnotesize] {Time (s)};
+        \draw[->] (0,0) -- (0,3) node[above, font=\footnotesize] {Brightness};
+        \draw (2,-0.9) node[font=\small] {Dimming (Slow)};
+
+        % Slow exponential curve (inverted)
+        \draw[outdoorzone, very thick, domain=0:3.5, samples=50]
+            plot (\x, {2.5 * exp(-0.6*\x)});
+
+        % Target line (slightly above x-axis)
+        \draw[dashed, gray] (0,0.25) -- (3.5,0.25) node[above right, font=\footnotesize] {Target};
+
+        % Time markers
+        \draw (2.5,0.1) -- (2.5,-0.1) node[below, font=\footnotesize] {2.5s};
+    \end{scope}
+\end{tikzpicture}
+\caption{Asymmetric Transition Timing: Fast Brightening vs. Slow Dimming}
+\label{fig:transition_timing}
+\end{figure}
+
+\subsection{Application-Specific Tuning}
+
+Step sizes and thresholds should be adjusted based on use case:
+
+\textbf{Automotive (Safety-Critical):}
+\begin{itemize}[leftmargin=*]
+    \item Large steps: 8\% (up), 4\% (down) -- driver needs immediate visibility
+    \item Medium steps: 4\% (up), 2\% (down) -- moderate transitions
+    \item Small steps: 1\% (up/down) -- fine-tuning near target
+    \item Thresholds: $T_{large} = 20\%$, $T_{small} = 5\%$
+    \item Typical settling time: 0.5--1.0 s (brightening), 1.5--2.5 s (dimming)
+\end{itemize}
+
+\textbf{Mobile/Laptop (Battery-Conscious):}
+\begin{itemize}[leftmargin=*]
+    \item Large steps: 5\% (up), 3\% (down) -- balance responsiveness and battery
+    \item Medium steps: 3\% (up), 2\% (down) -- smooth transitions
+    \item Small steps: 1\% (up/down) -- preserve battery near target
+    \item Thresholds: $T_{large} = 20\%$, $T_{small} = 5\%$
+    \item Typical settling time: 1--2 s (brightening), 3--5 s (dimming)
+\end{itemize}
+
+\textbf{Smart Home Display (Ambient):}
+\begin{itemize}[leftmargin=*]
+    \item Large steps: 3\% (up), 2\% (down) -- no urgency, smooth changes
+    \item Medium steps: 2\% (up), 1\% (down) -- imperceptible transitions
+    \item Small steps: 1\% (up/down) -- ultra-smooth near target
+    \item Thresholds: $T_{large} = 15\%$, $T_{small} = 5\%$
+    \item Typical settling time: 2--4 s (brightening), 5--10 s (dimming)
+\end{itemize}
+
+\subsection{Real-World Performance Validation}
+
+To validate the theoretical concepts presented in this section, we conducted live testing of the ALS-Dimmer system with a responsive configuration optimized for quick transitions. This subsection presents real-world performance data from a hardware test setup.
+
+\subsubsection{Test Configuration}
+
+The test used the following hardware and configuration:
+
+\textbf{Hardware Setup:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Platform:} Raspberry Pi 4
+    \item \textbf{Sensor:} Texas Instruments OPT4001 (I$^2$C, address 0x44)
+    \item \textbf{Display:} DDC/CI-compatible monitor via I$^2$C
+    \item \textbf{Test method:} Manual exposure of sensor to bright LED flashlight (50,000+ lux) followed by sensor covering (near 0 lux), repeated over 230 seconds
+\end{itemize}
+
+\textbf{Configuration Parameters (Responsive Profile):}
+
+\begin{table}[h]
+\centering
+\caption{Test Configuration Parameters}
+\label{tab:test_config}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Notes} \\
+\midrule
+\multicolumn{3}{l}{\textit{Control Loop Settings}} \\
+Update interval & 100 ms & 2$\times$ faster than default \\
+Hysteresis & 1.5\% & Reduced for faster zone transitions \\
+\midrule
+\multicolumn{3}{l}{\textit{Night Zone (0--10 lux)}} \\
+Brightness range & 5--30\% & \\
+Curve type & Logarithmic & \\
+Large steps & 8\% (up), 5\% (down) & 60\% faster than default \\
+Medium steps & 4\% (up), 2\% (down) & 100\% faster than default \\
+Small steps & 2\% (up), 1\% (down) & 100\% faster than default \\
+Thresholds & 15\% (large), 5\% (small) & \\
+\midrule
+\multicolumn{3}{l}{\textit{Indoor Zone (10--500 lux)}} \\
+Brightness range & 30--70\% & \\
+Curve type & Linear & \\
+Large steps & 12\% (up), 6\% (down) & 50\% faster than default \\
+Medium steps & 6\% (up), 3\% (down) & 100\% faster than default \\
+Small steps & 2\% (up), 1\% (down) & 100\% faster than default \\
+Thresholds & 20\% (large), 6\% (small) & \\
+\midrule
+\multicolumn{3}{l}{\textit{Outdoor Zone (500--100,000 lux)}} \\
+Brightness range & 70--100\% & \\
+Curve type & Logarithmic & \\
+Large steps & 15\% (up), 8\% (down) & 50\% faster than default \\
+Medium steps & 8\% (up), 4\% (down) & 100\% faster than default \\
+Small steps & 3\% (up), 2\% (down) & 50\% faster than default \\
+Thresholds & 20\% (large), 8\% (small) & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Performance Results}
+
+Figure~\ref{fig:control_loop_response} shows the complete system behavior over a 230-second test period with repeated rapid lighting transitions.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{../images/control-loop-response.jpg}
+\caption{\textbf{Real-World Control Loop Performance}\\[0.5em]
+Four-panel visualization of ALS-Dimmer adaptive brightness control during stress testing.\\[0.3em]
+\textbf{Top panel:} Ambient light (green, left axis) varies from near-0 to 50,000+ lux as sensor is repeatedly exposed to bright light and covered. Target brightness (blue dashed, right axis) is calculated from lux via zone curves. Actual brightness (red solid, right axis) tracks the target with visible lag during dimming transitions.\\[0.3em]
+\textbf{Second panel:} Error (blue) shows the difference between target and actual brightness. Step size (red) demonstrates the three-tier threshold algorithm adapting to error magnitude.\\[0.3em]
+\textbf{Third panel:} Step category visualization shows the system dynamically selecting large/medium/small steps or settling at target (none). Large steps (red/orange) dominate during rapid transitions; small steps (green/cyan) handle fine-tuning.\\[0.3em]
+\textbf{Bottom panel:} Zone transitions between night (blue), indoor (yellow), and outdoor (orange) demonstrate the zone-based mapping strategy handling six orders of magnitude dynamic range.\\[0.3em]
+Test configuration: 100ms update interval, responsive step sizes (Table~\ref{tab:test_config}).}
+\label{fig:control_loop_response}
+\end{figure}
+
+\subsubsection{Key Observations}
+
+The test data validates several theoretical predictions:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Asymmetric response is clearly visible:}
+        \begin{itemize}
+            \item Brightening transitions (dark $\rightarrow$ bright): Actual brightness tracks target with minimal lag, reaching 90--100\% within 1--2 seconds
+            \item Dimming transitions (bright $\rightarrow$ dark): Actual brightness exhibits deliberate lag, taking 3--5 seconds to reach low values, allowing comfortable visual adaptation
+        \end{itemize}
+
+    \item \textbf{Three-tier threshold algorithm in action:}
+        \begin{itemize}
+            \item Large steps (red/orange in panel 3) activate immediately when error exceeds 20\%, providing rapid initial response
+            \item Medium steps (yellow/pink) handle mid-range errors (6--20\%), smoothing the approach to target
+            \item Small steps (green/cyan) provide fine-tuning when error falls below 6\%
+            \item System settles at target (gray ``none'') for extended periods when lux is stable
+        \end{itemize}
+
+    \item \textbf{Zone-based operation:}
+        \begin{itemize}
+            \item Clean transitions between night ($<$10 lux), indoor (10--500 lux), and outdoor (500+ lux) zones
+            \item No oscillation or ``zone flapping'' despite 1.5\% hysteresis
+            \item Each zone's step sizes are independently optimized (larger steps in outdoor zone for faster response)
+        \end{itemize}
+
+    \item \textbf{Error convergence:}
+        \begin{itemize}
+            \item Error (panel 2, blue line) converges to zero when lux stabilizes
+            \item Spike pattern in error correlates directly with manual lighting changes
+            \item Step size (panel 2, red line) proportionally responds to error magnitude, validating the threshold-based approach
+        \end{itemize}
+
+    \item \textbf{System responsiveness:}
+        \begin{itemize}
+            \item Despite DDC/CI protocol overhead (~250--300ms per command), the system achieves sub-2-second brightening response
+            \item Responsive configuration (100ms update interval, larger steps) provides approximately 2--3$\times$ faster convergence than default settings
+            \item The system remains stable with no overshoot or oscillation, even under extreme stress testing
+        \end{itemize}
+\end{enumerate}
+
+\subsubsection{Comparison to Default Configuration}
+
+The responsive configuration tested here represents an optimized ``fast response'' profile. For comparison:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Default configuration:} 200ms update interval, smaller steps, higher thresholds
+        \begin{itemize}
+            \item Settling time: 4--6 seconds (brightening), 12--18 seconds (dimming)
+            \item Use case: Desktop monitors, ambient displays, battery-powered devices
+        \end{itemize}
+    \item \textbf{Responsive configuration (tested):} 100ms update interval, larger steps, lower thresholds
+        \begin{itemize}
+            \item Settling time: 1--2 seconds (brightening), 3--5 seconds (dimming)
+            \item Use case: Automotive IVI, safety-critical displays, user preference for ``smartphone-like'' feel
+        \end{itemize}
+\end{itemize}
+
+The test demonstrates that the ALS-Dimmer system successfully balances responsiveness with smoothness, providing fast adaptation to changing lighting conditions while maintaining comfortable, non-jarring transitions.
+
+\subsection{Summary}
+
+Response time is just as critical as target brightness calculation. Key takeaways:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Asymmetry is essential:} Fast brightening, slow dimming aligns with human physiology
+    \item \textbf{Three-tier threshold algorithm:} Fixed step sizes per error magnitude range provide predictable, zone-customizable transitions
+    \item \textbf{Per-zone customization:} Each lighting zone can define optimal step sizes and thresholds
+    \item \textbf{Application tuning:} Safety-critical systems use larger steps (faster), ambient systems use smaller steps (smoother)
+    \item \textbf{Real-world validation:} Hardware testing confirms theoretical predictions, demonstrating stable, responsive adaptive brightness control across six orders of magnitude dynamic range
+\end{itemize}
+
+With zone-based mapping, appropriate curves, and asymmetric threshold-based response timing, Part~I has covered the fundamental principles of adaptive brightness control. Part~II will explore how these concepts are implemented in the ALS-Dimmer system.

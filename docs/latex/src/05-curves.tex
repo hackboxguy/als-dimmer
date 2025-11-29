@@ -1,0 +1,211 @@
+%------------------------
+% Section 5: Brightness Curves
+%------------------------
+\section{Brightness Curve Mathematics}
+
+Once a zone is selected, the system must map the current lux value to a target brightness percentage. This section presents the two primary curve types used in adaptive brightness control: \textbf{linear} and \textbf{logarithmic}.
+
+\subsection{Linear Curves}
+
+Linear curves provide a straightforward proportional relationship between ambient light and display brightness.
+
+\subsubsection{Formula}
+
+\begin{equation}
+B(L) = B_{min} + \frac{B_{max} - B_{min}}{L_{max} - L_{min}} \cdot (L - L_{min})
+\label{eq:linear_curve}
+\end{equation}
+
+Where:
+\begin{itemize}[leftmargin=*]
+    \item $B(L)$ = Target brightness (\%) for ambient lux $L$
+    \item $B_{min}$ = Minimum brightness for the zone (\%)
+    \item $B_{max}$ = Maximum brightness for the zone (\%)
+    \item $L_{min}$ = Lower lux boundary of the zone
+    \item $L_{max}$ = Upper lux boundary of the zone
+    \item $L$ = Current ambient lux reading
+\end{itemize}
+
+\subsubsection{Example Calculation}
+
+Consider a \textbf{night zone} with the following parameters:
+\begin{itemize}[leftmargin=*]
+    \item Lux range: 0--5 lux
+    \item Brightness range: 5--20\%
+    \item Current ambient: 2.5 lux
+\end{itemize}
+
+Applying Equation~\ref{eq:linear_curve}:
+
+\begin{align*}
+B(2.5) &= 5 + \frac{20 - 5}{5 - 0} \cdot (2.5 - 0) \\
+       &= 5 + \frac{15}{5} \cdot 2.5 \\
+       &= 5 + 3 \cdot 2.5 \\
+       &= 5 + 7.5 \\
+       &= 12.5\%
+\end{align*}
+
+\textbf{Result:} At 2.5 lux, the display brightness is set to 12.5\%.
+
+\subsubsection{When to Use Linear Curves}
+
+Linear curves work well when:
+\begin{itemize}[leftmargin=*]
+    \item The lux range is narrow (1--2 orders of magnitude)
+    \item Fine-grained control is needed (e.g., night zones)
+    \item Human perception is approximately linear within the range
+    \item Predictable, proportional adjustments are desired
+\end{itemize}
+
+\subsection{Logarithmic Curves}
+
+Logarithmic curves align with the Weber-Fechner law, providing perceptually uniform adjustments across wide dynamic ranges.
+
+\subsubsection{Formula}
+
+\begin{equation}
+B(L) = B_{min} + (B_{max} - B_{min}) \cdot \frac{\log(1 + (L - L_{min}))}{\log(1 + (L_{max} - L_{min}))}
+\label{eq:log_curve}
+\end{equation}
+
+Where all variables are defined as in Equation~\ref{eq:linear_curve}, and $\log$ denotes the natural logarithm ($\ln$) or base-10 logarithm (both work; base-10 is more intuitive).
+
+\textbf{Implementation Note:} The formula uses $\log(1 + x)$ instead of $\log(L / L_{min})$ for improved numerical stability and to avoid potential edge cases when $L$ approaches $L_{min}$. This shifted logarithm approach maintains the perceptual uniformity property while being more robust in practice.
+
+\subsubsection{Example Calculation}
+
+Consider an \textbf{indoor zone} with:
+\begin{itemize}[leftmargin=*]
+    \item Lux range: 5--500 lux
+    \item Brightness range: 20--60\%
+    \item Current ambient: 50 lux
+\end{itemize}
+
+Using Equation~\ref{eq:log_curve} with base-10 logarithm:
+
+\begin{align*}
+B(50) &= 20 + (60 - 20) \cdot \frac{\log_{10}(1 + (50 - 5))}{\log_{10}(1 + (500 - 5))} \\
+      &= 20 + 40 \cdot \frac{\log_{10}(1 + 45)}{\log_{10}(1 + 495)} \\
+      &= 20 + 40 \cdot \frac{\log_{10}(46)}{\log_{10}(496)} \\
+      &= 20 + 40 \cdot \frac{1.663}{2.696} \\
+      &= 20 + 40 \cdot 0.617 \\
+      &= 20 + 24.7 \\
+      &= 44.7\%
+\end{align*}
+
+\textbf{Result:} At 50 lux, brightness is 44.7\%. Note that with the shifted logarithm, 50 lux produces slightly higher brightness than the mathematical midpoint, providing better visibility in the lower-to-mid lux range.
+
+\subsubsection{When to Use Logarithmic Curves}
+
+Logarithmic curves are ideal when:
+\begin{itemize}[leftmargin=*]
+    \item The lux range spans 2+ orders of magnitude
+    \item Perceptual uniformity is critical
+    \item The zone covers diverse lighting conditions (e.g., indoor, outdoor)
+    \item Alignment with Weber-Fechner law is desired
+\end{itemize}
+
+\subsection{Curve Comparison}
+
+Figure~\ref{fig:curve_comparison} illustrates the difference between linear and logarithmic curves for the same lux range (5--500 lux, targeting 20--60\% brightness).
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[scale=1.0]
+    % Axes
+    \draw[->] (0,0) -- (10,0) node[right] {Ambient Light (lux)};
+    \draw[->] (0,0) -- (0,5) node[above] {Brightness (\%)};
+
+    % Axis labels
+    \foreach \x/\label in {0/5, 2.5/62.5, 5/125, 7.5/250, 10/500} {
+        \draw (\x,0.1) -- (\x,-0.1) node[below, font=\footnotesize] {\label};
+    }
+    \foreach \y/\label in {0/20, 1.25/30, 2.5/40, 3.75/50, 5/60} {
+        \draw (0.1,\y) -- (-0.1,\y) node[left, font=\footnotesize] {\label};
+    }
+
+    % Linear curve (green)
+    \draw[indoorzone, very thick] (0,0) -- (10,5) node[pos=0.9, below, indoorzone] {Linear};
+
+    % Logarithmic curve (blue)
+    \draw[nightzone, very thick, domain=0:10, samples=100]
+        plot (\x, {5 * ln(1 + \x/0.5) / ln(1 + 10/0.5)});
+
+    % Logarithmic label (placed at middle of curve)
+    \node[nightzone, above] at (5, 4.2) {Logarithmic};
+
+    % Grid
+    \draw[gray!65, dashed] (0,0) grid (10,5);
+\end{tikzpicture}
+\caption{Linear vs. Logarithmic Curves (5--500 lux $\rightarrow$ 20--60\%)}
+\label{fig:curve_comparison}
+\end{figure}
+
+\textbf{Observation:} The logarithmic curve provides more sensitivity at lower lux values (steeper slope), which aligns better with human perception in environments transitioning from dim to moderate light.
+
+\subsection{Connection to Weber-Fechner Law}
+
+Recall from Section~3.3 that the Weber-Fechner law states:
+
+\begin{equation}
+P \propto \log(S)
+\label{eq:weber_fechner_recall}
+\end{equation}
+
+Where $P$ is perceived intensity and $S$ is stimulus intensity.
+
+Logarithmic brightness curves directly implement this relationship:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Stimulus:} Ambient light (lux)
+    \item \textbf{Perceived change:} Display brightness adjustment
+    \item \textbf{Result:} Equal percentage changes in lux produce equal perceived brightness changes
+\end{itemize}
+
+This is why logarithmic curves feel "natural" to users across wide dynamic ranges, while linear curves can feel too aggressive in bright conditions or too sluggish in dim ones.
+
+\subsection{Practical Curve Selection Guidelines}
+
+\begin{table}[h]
+\centering
+\caption{Recommended Curve Types by Zone}
+\label{tab:curve_selection}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Zone} & \textbf{Lux Range} & \textbf{Dynamic Range} & \textbf{Recommended Curve} \\
+\midrule
+Night         & 0--5 lux          & 1 order (narrow)     & Linear \\
+Indoor        & 5--500 lux        & 2 orders (wide)      & Logarithmic \\
+Outdoor       & 500--10,000 lux   & 2 orders (wide)      & Logarithmic \\
+Extreme       & 10,000+ lux       & 1 order (narrow)     & Linear \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Advanced: Hybrid and Custom Curves}
+
+Some implementations use hybrid approaches:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Piecewise curves:} Linear in some sub-ranges, logarithmic in others
+    \item \textbf{Exponential curves:} $B(L) = B_{min} \cdot (L / L_{min})^k$ where $k < 1$ for sub-linear growth
+    \item \textbf{User-tunable curves:} Allow end users to bias toward dimmer/brighter via a single parameter
+    \item \textbf{Learned curves:} Machine learning models that adapt to individual user preferences over time
+\end{itemize}
+
+However, the vast majority of practical systems achieve excellent results with the simple linear and logarithmic formulas presented here.
+
+\begin{quote}
+\textbf{Hardware transfer assumption:} All equations in this section assume the display exposes a roughly linear 0--100\% control (or that the backlight driver already compensates for its own non-linearity). If a panel's PWM-to-luminance curve is strongly non-linear, add a calibration layer or lookup table so that ``percent'' commands correspond to actual nits; otherwise the lux $\rightarrow$ percent curves here will not yield consistent perceptual changes.
+\end{quote}
+
+\subsection{Summary}
+
+Brightness curves translate lux measurements into display brightness percentages. The choice between linear and logarithmic depends on the zone's dynamic range:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Narrow ranges (night, extreme):} Linear curves provide intuitive, proportional control
+    \item \textbf{Wide ranges (indoor, outdoor):} Logarithmic curves align with human perception
+    \item \textbf{Mathematical foundation:} Logarithmic curves implement the Weber-Fechner law
+\end{itemize}
+
+The next section addresses how quickly these brightness changes should be applied.

@@ -1,0 +1,68 @@
+\section{Introduction}
+
+\subsection{Motivation}
+
+Displays are ubiquitous in modern life -- from smartphones and laptops to automotive in-vehicle infotainment (IVI) systems and home entertainment. However, the ambient light conditions under which these displays operate vary dramatically throughout the day and across different environments. A display that is comfortably readable indoors may become completely invisible in direct sunlight, while a brightness level appropriate for daylight can cause severe eye strain and glare during nighttime use.
+
+\textbf{The challenge:} Human environments span over \textbf{six orders of magnitude} in ambient illuminance -- from dark rooms at night (0.1 lux) to direct sunlight (100,000+ lux). Fixed-brightness displays fail to address this dynamic range, leading to:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Poor visibility} in bright environments (safety hazard in automotive applications)
+    \item \textbf{Eye strain and glare} in dark environments (health and comfort issue)
+    \item \textbf{Reduced battery life} from unnecessarily high brightness settings
+    \item \textbf{Suboptimal user experience} requiring constant manual adjustments
+\end{itemize}
+
+\subsection{The Solution: Adaptive Brightness Control}
+
+Adaptive brightness control uses an \textbf{Ambient Light Sensor (ALS)} to continuously monitor environmental illuminance and automatically adjust display brightness to maintain optimal visibility and comfort. This technology is now standard in:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Automotive IVI systems} -- Essential for safety during rapid lighting transitions (tunnels, tree cover, parking structures)
+    \item \textbf{Mobile devices} -- Improves battery life and user comfort
+    \item \textbf{Laptops and monitors} -- Reduces eye strain during prolonged use
+    \item \textbf{Smart home displays} -- Seamless integration with ambient lighting
+\end{itemize}
+
+\subsection{Document Scope and Audience}
+
+This document serves two purposes:
+
+\textbf{Part I} provides the \textbf{scientific foundation} for adaptive brightness control:
+\begin{itemize}[noitemsep]
+    \item Human visual perception and light adaptation physiology
+    \item Typical lux ranges in home and automotive environments  
+    \item Zone-based mapping strategies for non-linear perception
+    \item Curve mathematics (linear vs logarithmic)
+    \item Asymmetric response time design principles
+\end{itemize}
+
+\textbf{Part II} presents the \textbf{ALS-Dimmer implementation}:
+\begin{itemize}[noitemsep]
+    \item Hardware-agnostic Linux daemon architecture
+    \item Modular sensor and output abstractions
+    \item JSON-based configuration system
+    \item Control interface for IVI integration
+    \item Deployment and testing guidelines
+\end{itemize}
+
+\textbf{Target Audience:}
+\begin{itemize}[noitemsep]
+    \item \textbf{Engineers} implementing ALS-based brightness control for displays
+    \item \textbf{Product managers} evaluating adaptive brightness solutions
+    \item \textbf{Automotive OEMs} integrating IVI systems
+    \item \textbf{Display manufacturers} seeking differentiation features
+\end{itemize}
+
+This document assumes basic familiarity with embedded Linux systems, I2C/CAN protocols, and display technologies. No prior knowledge of photometry or human vision is required -- all concepts are explained from first principles with practical engineering focus.
+
+\subsection{Why This Matters}
+
+Properly designed adaptive brightness control is not merely a convenience feature. In automotive applications, it is a \textbf{safety-critical} function:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Tunnel transitions} require rapid brightness increase (dark → bright in $<$2 seconds)
+    \item \textbf{Night driving} requires minimal glare to preserve dark-adapted vision
+    \item \textbf{Direct sunlight} requires maximum brightness for navigation visibility
+\end{itemize}
+

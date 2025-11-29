@@ -1,0 +1,134 @@
+%------------------------
+% Section 4: Zone-Based Mapping
+%------------------------
+\section{Zone-Based Mapping Strategy}
+
+\subsection{The Dynamic Range Challenge}
+
+Real-world display systems must operate across an extraordinarily wide range of ambient light conditions. From dark rooms at night (0.1 lux) to direct sunlight (100,000+ lux), displays must remain readable and comfortable. This represents a dynamic range spanning \textbf{six orders of magnitude}.
+
+Attempting to map this entire range with a single brightness curve inevitably leads to problems:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Loss of sensitivity:} Small changes in dim environments go unnoticed
+    \item \textbf{Overshooting:} Moderate light changes trigger excessive brightness adjustments
+    \item \textbf{Poor usability:} No single curve satisfies both night and day scenarios
+    \item \textbf{User frustration:} Constant manual intervention required
+\end{itemize}
+
+The fundamental issue is that human perception is \emph{locally linear} but \emph{globally logarithmic}. Within a specific lighting context (e.g., indoor office), small linear adjustments work well. But across vastly different contexts (night vs. day), logarithmic scaling is essential.
+
+\subsection{The Zone-Based Solution}
+
+Rather than using a single curve, the zone-based approach divides the ambient light spectrum into discrete \textbf{zones}, each with its own optimized brightness curve and response characteristics.
+
+\textbf{Key principle:} Each zone handles a manageable subset of the dynamic range where a single curve type (linear or logarithmic) can provide good perceptual uniformity.
+
+\subsubsection{Typical Zone Breakdown}
+
+Most practical implementations use 3-5 zones:
+
+\begin{table}[h]
+\centering
+\caption{Example Zone Configuration}
+\label{tab:zone_config}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+\textbf{Zone} & \textbf{Lux Range} & \textbf{Curve Type} & \textbf{Brightness Range} & \textbf{Use Case} \\
+\midrule
+Night     & 0--5 lux       & Linear      & 5--20\%   & Dark rooms, nighttime driving \\
+Indoor    & 5--500 lux     & Logarithmic & 20--60\%  & Home, office, cloudy day \\
+Outdoor   & 500--10,000 lux & Logarithmic & 60--90\%  & Bright day, direct sun \\
+Extreme   & 10,000+ lux    & Linear      & 90--100\% & Desert, snow, reflections \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Zone Selection Logic}
+
+The system continuously monitors the ambient light sensor and selects the appropriate zone:
+
+\begin{lstlisting}[language=C++, caption={Zone Selection Algorithm (Simplified)}]
+Zone selectZone(float lux) {
+    if (lux < 5.0) {
+        return ZONE_NIGHT;
+    } else if (lux < 500.0) {
+        return ZONE_INDOOR;
+    } else if (lux < 10000.0) {
+        return ZONE_OUTDOOR;
+    } else {
+        return ZONE_EXTREME;
+    }
+}
+\end{lstlisting}
+
+\textbf{Hysteresis:} To prevent oscillation near zone boundaries, implementations typically use hysteresis - requiring the lux value to cross a threshold by a certain margin before switching zones.
+
+\subsection{Benefits of Zone-Based Mapping}
+
+\begin{table}[h]
+\centering
+\caption{Advantages of Zone-Based vs. Single-Curve Approach}
+\label{tab:zone_benefits}
+\begin{tabular}{@{}p{0.35\textwidth}p{0.28\textwidth}p{0.28\textwidth}@{}}
+\toprule
+\textbf{Aspect} & \textbf{Single Curve} & \textbf{Zone-Based} \\
+\midrule
+Sensitivity in dim light & Poor (compressed) & Excellent (dedicated zone) \\
+Handling extreme range & Impossible & Natural (per-zone curves) \\
+Perceptual uniformity & Compromised & High (zone-optimized) \\
+User intervention & Frequent & Minimal \\
+Configuration flexibility & Limited & High (per-zone tuning) \\
+Computational cost & Low & Low (simple lookups) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Zone Transition Smoothing}
+
+To avoid abrupt changes when crossing zone boundaries, most implementations use:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Boundary overlap:} Allow brief co-existence of adjacent zones
+    \item \textbf{Gradual transition:} Blend between zone curves near boundaries
+    \item \textbf{Rate limiting:} Constrain brightness change rate during transitions
+    \item \textbf{Hysteresis bands:} Different thresholds for upward vs. downward transitions
+\end{enumerate}
+
+\subsection{Customization Per Use Case}
+
+Zone boundaries and curves should be tailored to the specific application:
+
+\textbf{Automotive IVI:}
+\begin{itemize}[leftmargin=*]
+    \item Emphasis on nighttime readability (expanded night zone)
+    \item Outdoor zone handles 50,000+ lux (dashboard reflections)
+    \item Aggressive dimming at night (safety: no distraction)
+\end{itemize}
+
+\textbf{Laptop/Mobile:}
+\begin{itemize}[leftmargin=*]
+    \item Indoor zone covers most usage (5--500 lux)
+    \item Battery conservation prioritized in dim zones
+    \item User preference learning over time
+\end{itemize}
+
+\textbf{Smart Home Display:}
+\begin{itemize}[leftmargin=*]
+    \item Night zone extends higher (5--20 lux) for bedrooms
+    \item Slower transitions (ambient, not safety-critical)
+    \item Integration with room lighting controls
+\end{itemize}
+
+\subsection{Summary}
+
+Zone-based mapping solves the "impossible problem" of mapping a six order of magnitude dynamic range onto a 0--100\% brightness scale. By dividing the spectrum into manageable zones, each with optimized curves and response times, the system provides:
+
+\begin{itemize}[leftmargin=*]
+    \item Excellent sensitivity across all lighting conditions
+    \item Natural, perceptually-uniform brightness adjustments
+    \item Minimal need for user intervention
+    \item Flexibility for application-specific tuning
+\end{itemize}
+
+The next section explores the mathematical curves used within each zone.

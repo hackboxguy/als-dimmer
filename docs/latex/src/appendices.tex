@@ -1,0 +1,437 @@
+%------------------------
+% Appendices
+%------------------------
+\appendix
+
+\section{Complete Configuration Examples}
+
+This appendix provides complete, tested JSON configurations for common deployment scenarios.
+
+\subsection{Appendix A.1: Automotive IVI - OPT4001 + DDC/CI}
+
+\begin{lstlisting}[caption={Automotive Configuration (Full)}, basicstyle=\ttfamily\scriptsize]
+{
+    "sensor": {
+        "type": "opt4001",
+        "i2c_bus": "/dev/i2c-1",
+        "i2c_address": "0x44"
+    },
+    "output": {
+        "type": "ddcci",
+        "i2c_bus": "/dev/i2c-5",
+        "vcp_code": "0x10"
+    },
+    "zones": [
+        {
+            "name": "night",
+            "min_lux": 0.0,
+            "max_lux": 5.0,
+            "curve_type": "linear",
+            "min_brightness": 5,
+            "max_brightness": 18,
+            "up_gain": 0.28,
+            "down_gain": 0.10
+        },
+        {
+            "name": "indoor",
+            "min_lux": 5.0,
+            "max_lux": 1000.0,
+            "curve_type": "logarithmic",
+            "min_brightness": 18,
+            "max_brightness": 65,
+            "up_gain": 0.25,
+            "down_gain": 0.12
+        },
+        {
+            "name": "outdoor",
+            "min_lux": 1000.0,
+            "max_lux": 100000.0,
+            "curve_type": "logarithmic",
+            "min_brightness": 65,
+            "max_brightness": 100,
+            "up_gain": 0.35,
+            "down_gain": 0.18
+        }
+    ],
+    "control": {
+        "loop_period_ms": 120,
+        "error_threshold": 0.5,
+        "min_step_size": 1.0,
+        "hysteresis_percent": 10.0,
+        "manual_timeout_seconds": 60
+    },
+    "control_interface": {
+        "tcp": {
+            "enabled": false
+        },
+        "unix": {
+            "enabled": true,
+            "socket_path": "/tmp/als-dimmer.sock"
+        }
+    }
+}
+\end{lstlisting}
+
+\subsection{Appendix A.2: CAN-Based System}
+
+\begin{lstlisting}[caption={CAN-Based Configuration (Full)}, basicstyle=\ttfamily\scriptsize]
+{
+    "sensor": {
+        "type": "can_als",
+        "can_interface": "can0",
+        "can_id": "0x300",
+        "data_offset": 2,
+        "data_length": 2,
+        "endianness": "big",
+        "scale_factor": 0.1
+    },
+    "output": {
+        "type": "can_output",
+        "can_interface": "can0",
+        "can_id": "0x400",
+        "data_offset": 0,
+        "data_length": 1,
+        "scale_factor": 2.55
+    },
+    "zones": [
+        {
+            "name": "low",
+            "min_lux": 0.0,
+            "max_lux": 10.0,
+            "curve_type": "linear",
+            "min_brightness": 10,
+            "max_brightness": 25,
+            "up_gain": 0.20,
+            "down_gain": 0.08
+        },
+        {
+            "name": "medium",
+            "min_lux": 10.0,
+            "max_lux": 1000.0,
+            "curve_type": "logarithmic",
+            "min_brightness": 25,
+            "max_brightness": 70,
+            "up_gain": 0.22,
+            "down_gain": 0.10
+        },
+        {
+            "name": "high",
+            "min_lux": 1000.0,
+            "max_lux": 50000.0,
+            "curve_type": "logarithmic",
+            "min_brightness": 70,
+            "max_brightness": 95,
+            "up_gain": 0.30,
+            "down_gain": 0.15
+        }
+    ],
+    "control": {
+        "loop_period_ms": 100,
+        "error_threshold": 1.0,
+        "min_step_size": 1.0,
+        "hysteresis_percent": 12.0,
+        "manual_timeout_seconds": 30
+    },
+    "control_interface": {
+        "tcp": {
+            "enabled": true,
+            "port": 9000,
+            "bind_address": "127.0.0.1"
+        },
+        "unix": {
+            "enabled": true,
+            "socket_path": "/var/run/als-dimmer.sock"
+        }
+    }
+}
+\end{lstlisting}
+
+\subsection{Appendix A.3: Development/Testing Configuration}
+
+\begin{lstlisting}[caption={File-Based Test Configuration (Full)}, basicstyle=\ttfamily\scriptsize]
+{
+    "sensor": {
+        "type": "file",
+        "file_path": "/tmp/test_lux.txt"
+    },
+    "output": {
+        "type": "file",
+        "file_path": "/tmp/test_brightness.txt"
+    },
+    "zones": [
+        {
+            "name": "test_zone_low",
+            "min_lux": 0.0,
+            "max_lux": 100.0,
+            "curve_type": "linear",
+            "min_brightness": 10,
+            "max_brightness": 40,
+            "up_gain": 0.30,
+            "down_gain": 0.15
+        },
+        {
+            "name": "test_zone_high",
+            "min_lux": 100.0,
+            "max_lux": 10000.0,
+            "curve_type": "logarithmic",
+            "min_brightness": 40,
+            "max_brightness": 90,
+            "up_gain": 0.30,
+            "down_gain": 0.15
+        }
+    ],
+    "control": {
+        "loop_period_ms": 50,
+        "error_threshold": 0.1,
+        "min_step_size": 0.5,
+        "hysteresis_percent": 5.0,
+        "manual_timeout_seconds": 10
+    },
+    "control_interface": {
+        "tcp": {
+            "enabled": true,
+            "port": 9000,
+            "bind_address": "127.0.0.1"
+        },
+        "unix": {
+            "enabled": false
+        }
+    }
+}
+\end{lstlisting}
+
+\clearpage
+
+\section{Build and Installation Reference}
+
+\subsection{Appendix B.1: Dependencies}
+
+\subsubsection{Ubuntu/Debian}
+
+\begin{lstlisting}[language=bash, caption={Install Build Dependencies (Ubuntu 20.04+)}]
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libi2c-dev \
+    nlohmann-json3-dev \
+    libspdlog-dev \
+    libsocketcan-dev
+\end{lstlisting}
+
+\subsubsection{Fedora/RHEL}
+
+\begin{lstlisting}[language=bash, caption={Install Build Dependencies (Fedora 34+)}]
+sudo dnf install -y \
+    gcc-c++ \
+    cmake \
+    git \
+    i2c-tools-devel \
+    json-devel \
+    spdlog-devel \
+    libsocketcan-devel
+\end{lstlisting}
+
+\subsection{Appendix B.2: Complete Build Sequence}
+
+\begin{lstlisting}[language=bash, caption={Full Build and Install}]
+# Clone repository
+git clone https://github.com/your-org/als-dimmer.git
+cd als-dimmer
+
+# Create build directory
+mkdir build && cd build
+
+# Configure with all options
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_TESTING=ON \
+      -DENABLE_OPT4001=ON \
+      -DENABLE_CAN=ON \
+      -DENABLE_DDCCI=ON \
+      -DINSTALL_SYSTEMD=ON \
+      ..
+
+# Build with all cores
+make -j$(nproc)
+
+# Run tests
+make test
+
+# Install (requires root)
+sudo make install
+
+# Enable and start service
+sudo systemctl enable als-dimmer
+sudo systemctl start als-dimmer
+\end{lstlisting}
+
+\subsection{Appendix B.3: Yocto Integration}
+
+\begin{lstlisting}[caption={als-dimmer.bb Yocto Recipe}, basicstyle=\ttfamily\scriptsize]
+SUMMARY = "ALS-Dimmer Adaptive Brightness Control Daemon"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=..."
+
+SRC_URI = "git://github.com/your-org/als-dimmer.git;protocol=https"
+SRCREV = "${AUTOREV}"
+
+S = "${WORKDIR}/git"
+
+DEPENDS = "nlohmann-json spdlog"
+
+inherit cmake systemd
+
+SYSTEMD_SERVICE_${PN} = "als-dimmer.service"
+SYSTEMD_AUTO_ENABLE = "enable"
+
+EXTRA_OECMAKE = "-DCMAKE_BUILD_TYPE=Release \
+                 -DINSTALL_SYSTEMD=ON"
+
+do_install_append() {
+    install -d ${D}${sysconfdir}/als-dimmer
+    install -m 0644 ${WORKDIR}/automotive-config.json \
+        ${D}${sysconfdir}/als-dimmer/config.json
+}
+
+FILES_${PN} += "${systemd_system_unitdir}/als-dimmer.service \
+                ${sysconfdir}/als-dimmer/config.json"
+\end{lstlisting}
+
+\clearpage
+
+\section{Mathematical Details}
+
+\subsection{Appendix C.1: Detailed Curve Formulas}
+
+\subsubsection{Linear Curve (General Form)}
+
+\begin{equation}
+B(L) = B_{min} + m \cdot (L - L_{min})
+\end{equation}
+
+Where slope $m$ is:
+\begin{equation}
+m = \frac{B_{max} - B_{min}}{L_{max} - L_{min}}
+\end{equation}
+
+\textbf{Example with numbers:} Zone from 0--5 lux mapping to 5--20\% brightness:
+\begin{align*}
+m &= \frac{20 - 5}{5 - 0} = 3.0 \\
+B(L) &= 5 + 3.0 \cdot (L - 0) = 5 + 3L
+\end{align*}
+
+At $L = 2$ lux: $B(2) = 5 + 3 \times 2 = 11\%$
+
+\subsubsection{Logarithmic Curve (Base-10)}
+
+\begin{equation}
+B(L) = B_{min} + (B_{max} - B_{min}) \cdot \frac{\log_{10}(L / L_{min})}{\log_{10}(L_{max} / L_{min})}
+\end{equation}
+
+\textbf{Example:} Zone from 5--500 lux mapping to 20--60\% brightness:
+\begin{align*}
+B(L) &= 20 + 40 \cdot \frac{\log_{10}(L / 5)}{\log_{10}(500 / 5)} \\
+     &= 20 + 40 \cdot \frac{\log_{10}(L / 5)}{2.0}
+\end{align*}
+
+At $L = 50$ lux:
+\begin{align*}
+B(50) &= 20 + 40 \cdot \frac{\log_{10}(50 / 5)}{2.0} \\
+      &= 20 + 40 \cdot \frac{1.0}{2.0} = 40\%
+\end{align*}
+
+\subsection{Appendix C.2: Step Size Examples}
+
+Given current brightness $B_c = 30\%$, target $B_t = 60\%$, error $e = 30\%$:
+
+\textbf{Brightening ($k_{up} = 0.25$):}
+\begin{align*}
+\Delta B &= 0.25 \times 30 = 7.5\% \\
+B_{new} &= 30 + 7.5 = 37.5\%
+\end{align*}
+
+\textbf{Dimming ($k_{down} = 0.10$):}
+\begin{align*}
+\Delta B &= 0.10 \times 30 = 3.0\% \\
+B_{new} &= 60 - 3.0 = 57.0\%
+\end{align*}
+
+\textbf{Convergence time estimation:}
+For error $e_0$ and gain $k$, after $n$ iterations:
+\begin{equation}
+e_n = e_0 \cdot (1 - k)^n
+\end{equation}
+
+To reach $e_n < 1\%$ from $e_0 = 30\%$ with $k = 0.25$:
+\begin{align*}
+1 &> 30 \cdot (0.75)^n \\
+n &> \frac{\log(1/30)}{\log(0.75)} \approx 11.8 \text{ iterations}
+\end{align*}
+
+At 100 ms per iteration: $\approx 1.2$ seconds to converge.
+
+\clearpage
+
+\section{References and Further Reading}
+
+\subsection{Appendix D.1: Project Resources}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Repository:} \texttt{https://github.com/your-org/als-dimmer}
+    \item \textbf{Issue Tracker:} \texttt{https://github.com/your-org/als-dimmer/issues}
+    \item \textbf{Documentation:} \texttt{https://als-dimmer.readthedocs.io}
+    \item \textbf{Author Contact:} albert.david@gmail.com
+\end{itemize}
+
+\subsection{Appendix D.2: Hardware Datasheets}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{TI OPT4001:} Texas Instruments, ``OPT4001 High-Speed High-Precision Light-to-Digital Sensor,'' Datasheet, 2022.
+    \item \textbf{DDC/CI Specification:} VESA, ``Display Data Channel Command Interface (DDC/CI) Standard,'' Version 1.1, 2004.
+    \item \textbf{I2C Specification:} NXP Semiconductors, ``I2C-bus specification and user manual,'' Rev. 7.0, 2021.
+\end{itemize}
+
+\subsection{Appendix D.3: Standards and Protocols}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{CAN Bus:} ISO 11898-1:2015, ``Road vehicles -- Controller area network (CAN)''
+    \item \textbf{DDC/CI:} VESA MCCS (Monitor Control Command Set) Standard
+    \item \textbf{Systemd:} \texttt{https://www.freedesktop.org/wiki/Software/systemd/}
+\end{itemize}
+
+\subsection{Appendix D.4: Scientific Background}
+
+\begin{itemize}[leftmargin=*]
+    \item Weber, E. H. (1834). \textit{De Pulsu, Resorptione, Auditu et Tactu.} Leipzig: Koehler.
+    \item Fechner, G. T. (1860). \textit{Elemente der Psychophysik.} Leipzig: Breitkopf und Härtel.
+    \item Hood, D. C., \& Finkelstein, M. A. (1986). ``Sensitivity to Light.'' In \textit{Handbook of Perception and Human Performance}, Vol. 1, K. R. Boff, L. Kaufman, \& J. P. Thomas (Eds.), New York: Wiley.
+    \item Fairchild, M. D. (2013). \textit{Color Appearance Models}, 3rd Ed. Wiley-IS\&T Series in Imaging Science and Technology.
+\end{itemize}
+
+\subsection{Appendix D.5: Related Open-Source Projects}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Calise:} Camera-based adaptive brightness for Linux desktops
+    \item \textbf{brightnessctl:} Simple brightness control utility for Linux
+    \item \textbf{ddcutil:} DDC/CI communication tool for monitors
+    \item \textbf{iio-sensor-proxy:} IIO sensor interface daemon (includes ALS support)
+\end{itemize}
+
+\subsection{Appendix D.6: Suggested Reading for Implementation}
+
+For teams implementing adaptive brightness systems:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Fundamentals:} Fairchild's \textit{Color Appearance Models} (Chapter 2: Visual Response) provides excellent background on human vision.
+    \item \textbf{Automotive context:} SAE J1757 ``Recommended Practice for Selection, Installation, and Testing of Automatic Headlamp Beam Switching Devices'' offers insights into automotive ALS applications.
+    \item \textbf{Control theory:} Åström \& Murray's \textit{Feedback Systems: An Introduction for Scientists and Engineers} covers proportional control and error-based systems.
+    \item \textbf{Embedded Linux:} Yaghmour's \textit{Building Embedded Linux Systems} for deployment strategies and systemd integration.
+\end{enumerate}
+
+\vspace{2em}
+\noindent\rule{\textwidth}{0.4pt}
+
+\begin{center}
+\textbf{End of Document}
+\end{center}

@@ -1,0 +1,287 @@
+%------------------------
+% Section 8: Component Implementation Details
+%------------------------
+\section{Modular Component Design}
+
+ALS-Dimmer's hardware abstraction is achieved through two key interface hierarchies: \textbf{SensorInterface} and \textbf{OutputInterface}. This section details the design and available implementations.
+
+\subsection{SensorInterface: Ambient Light Sensor Abstraction}
+
+All ambient light sensors implement a common interface with the following contract:
+
+\begin{lstlisting}[language=C++, caption={Sensor Interface (Simplified)}]
+class SensorInterface {
+public:
+    virtual ~SensorInterface() = default;
+
+    // Initialize sensor hardware
+    virtual bool initialize() = 0;
+
+    // Read current lux value
+    virtual std::optional<float> read_lux() = 0;
+
+    // Check if sensor is operational
+    virtual bool is_operational() const = 0;
+
+    // Get sensor name for logging
+    virtual std::string get_name() const = 0;
+};
+\end{lstlisting}
+
+\subsubsection{Available Sensor Implementations}
+
+\paragraph{1. OPT4001 Sensor}
+
+Texas Instruments OPT4001 high-precision I2C light sensor, automotive-grade (-40°C to +125°C).
+
+\textbf{Features:}
+\begin{itemize}[leftmargin=*]
+    \item 20-bit mantissa + 4-bit exponent (auto-range 0-8), 0.437 µLux to 117,441 lux range (SOT-5X3)
+    \item Human eye spectral response matching (photopic filter)
+    \item Low power consumption ($<$2 µA standby)
+    \item Direct I2C interface (address 0x44 or 0x45)
+\end{itemize}
+
+\textbf{Configuration parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{i2c\_bus}: I2C bus path (e.g., \texttt{/dev/i2c-1})
+    \item \texttt{i2c\_address}: Sensor I2C address (default: \texttt{0x44})
+\end{itemize}
+
+\textbf{Hardware Configuration (Validated):}
+\begin{itemize}[leftmargin=*]
+    \item Register 0x0A: \texttt{0x3239} (auto-range, 100ms conversion, continuous mode)
+    \item \textbf{Critical:} Bit 14 (reserved) MUST be 0 per datasheet specification
+    \item Initialization wait: 150ms after configuration before first read
+    \item Config readback verification recommended to detect hardware rejection
+\end{itemize}
+
+\textbf{Note:} Sensor polling rate is controlled globally by \texttt{control.update\_interval\_ms} (typically 200--500ms for OPT4001).
+
+\paragraph{2. FPGA-OPT4001 Sensor}
+
+OPT4001 connected via FPGA I2C bridge. Used when OPT4001 is not directly accessible from CPU's I2C bus (common in automotive SoCs with FPGA co-processors).
+
+\textbf{Differences from direct OPT4001:}
+\begin{itemize}[leftmargin=*]
+    \item Custom FPGA register interface instead of standard I2C
+    \item Sensor data read from FPGA memory-mapped registers
+    \item May include FPGA-side filtering/averaging
+\end{itemize}
+
+\paragraph{3. CAN ALS Sensor}
+
+Receives ambient light data via CAN bus. Common in automotive systems where ALS is integrated into another ECU (e.g., body control module).
+
+\textbf{Configuration parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{can\_interface}: CAN interface name (e.g., \texttt{can0})
+    \item \texttt{can\_id}: CAN message ID containing lux data
+    \item \texttt{data\_offset}: Byte offset within CAN message
+    \item \texttt{scale\_factor}: Multiplier to convert raw value to lux
+\end{itemize}
+
+\textbf{Example:} If body module sends lux in CAN ID 0x300, bytes 2--3 (16-bit big-endian), scaled by 0.1:
+\begin{lstlisting}[]
+"sensor": {
+    "type": "can_als",
+    "can_interface": "can0",
+    "can_id": "0x300",
+    "data_offset": 2,
+    "scale_factor": 0.1
+}
+\end{lstlisting}
+
+\paragraph{4. File Sensor (Testing/Integration)}
+
+Reads lux value from a text file. Ideal for:
+\begin{itemize}[leftmargin=*]
+    \item Automated testing and CI/CD pipelines
+    \item Simulation of lighting scenarios
+    \item Integration with external systems that write lux to file
+\end{itemize}
+
+\textbf{Configuration:}
+\begin{lstlisting}[]
+"sensor": {
+    "type": "file",
+    "file_path": "/tmp/ambient_lux.txt"
+}
+\end{lstlisting}
+
+The file should contain a single floating-point value representing lux.
+
+\subsection{OutputInterface: Display Brightness Control Abstraction}
+
+All display outputs implement a common interface:
+
+\begin{lstlisting}[language=C++, caption={Output Interface (Simplified)}]
+class OutputInterface {
+public:
+    virtual ~OutputInterface() = default;
+
+    // Initialize output hardware
+    virtual bool initialize() = 0;
+
+    // Set brightness (0-100)
+    virtual bool set_brightness(uint8_t percent) = 0;
+
+    // Get current brightness
+    virtual std::optional<uint8_t> get_brightness() = 0;
+
+    // Check if output is operational
+    virtual bool is_operational() const = 0;
+
+    // Get output name for logging
+    virtual std::string get_name() const = 0;
+};
+\end{lstlisting}
+
+\subsubsection{Available Output Implementations}
+
+\paragraph{1. DDC/CI Output}
+
+Controls monitor brightness using VESA DDC/CI (Display Data Channel / Command Interface) protocol over I2C.
+
+\textbf{Use cases:}
+\begin{itemize}[leftmargin=*]
+    \item External monitors connected via HDMI/DisplayPort
+    \item Automotive head-up displays with DDC/CI support
+    \item Development systems with standard monitors
+\end{itemize}
+
+\textbf{Configuration parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{i2c\_bus}: I2C bus path (e.g., \texttt{/dev/i2c-5})
+    \item \texttt{vcp\_code}: VCP feature code for brightness (default: \texttt{0x10})
+\end{itemize}
+
+\paragraph{2. I2C Dimmer Output}
+
+Direct control of LED dimmer ICs(e.g FPGA/TCON) via I2C. Common in automotive instrument clusters.
+
+\textbf{Supported dimmer ICs:}
+\begin{itemize}[leftmargin=*]
+    \item Generic PWM dimmers with brightness registers
+    \item Custom automotive dimmer ICs
+\end{itemize}
+
+\textbf{Configuration parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{i2c\_bus}: I2C bus path
+    \item \texttt{i2c\_address}: Dimmer IC address
+    \item \texttt{brightness\_register}: Register address for brightness
+    \item \texttt{max\_value}: Maximum register value (for 0--100\% mapping)
+\end{itemize}
+
+\paragraph{3. CAN Output}
+
+Broadcasts brightness via CAN bus. Used when display is controlled by another ECU over CAN.
+
+\textbf{Configuration parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{can\_interface}: CAN interface name (e.g., \texttt{can0})
+    \item \texttt{can\_id}: CAN message ID for brightness command
+    \item \texttt{data\_offset}: Byte offset within message
+    \item \texttt{scale\_factor}: Multiplier to convert percent to raw value
+\end{itemize}
+
+\paragraph{4. File Output (Testing/Integration)}
+
+Writes brightness percentage to a text file.
+
+\textbf{Use cases:}
+\begin{itemize}[leftmargin=*]
+    \item Automated testing (verify output values)
+    \item Integration with external brightness control mechanisms
+    \item Debugging and logging
+\end{itemize}
+
+\textbf{Configuration:}
+\begin{lstlisting}[]
+"output": {
+    "type": "file",
+    "file_path": "/tmp/brightness_output.txt"
+}
+\end{lstlisting}
+
+The daemon writes brightness as a single integer (0--100) to the file.
+
+\subsection{Modular Architecture Benefits}
+
+The current implementation uses a \textbf{factory pattern} with interface-based design. All sensor and output implementations are compiled into the binary and instantiated at runtime based on JSON configuration.
+
+Figure~\ref{fig:plugin_arch} illustrates the interface hierarchy:
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    scale=0.8,
+    every node/.style={transform shape},
+    node distance=0.9cm and 3.5cm,
+    interface/.style={rectangle, draw, fill=blue!10, text width=3.2cm, text centered, minimum height=0.8cm},
+    impl/.style={rectangle, draw, fill=green!10, text width=3.2cm, text centered, minimum height=0.7cm, font=\small},
+]
+    % Sensor hierarchy
+    \node[interface] (sensor_if) {\textbf{SensorInterface}};
+    \node[impl, below=of sensor_if] (opt4001) {OPT4001};
+    \node[impl, below=of opt4001] (fpga_opt) {FPGA-OPT4001};
+    \node[impl, below=of fpga_opt] (can_als) {CAN ALS};
+    \node[impl, below=of can_als] (file_sensor) {File Sensor};
+
+    \draw[->, dashed] (sensor_if) -- (opt4001);
+    \draw[->, dashed] (sensor_if) -- (fpga_opt);
+    \draw[->, dashed] (sensor_if) -- (can_als);
+    \draw[->, dashed] (sensor_if) -- (file_sensor);
+
+    % Output hierarchy
+    \node[interface, right=of sensor_if] (output_if) {\textbf{OutputInterface}};
+    \node[impl, below=of output_if] (ddcci) {DDC/CI};
+    \node[impl, below=of ddcci] (i2c_dimmer) {I2C Dimmer};
+    \node[impl, below=of i2c_dimmer] (can_out) {CAN Output};
+    \node[impl, below=of can_out] (file_output) {File Output};
+
+    \draw[->, dashed] (output_if) -- (ddcci);
+    \draw[->, dashed] (output_if) -- (i2c_dimmer);
+    \draw[->, dashed] (output_if) -- (can_out);
+    \draw[->, dashed] (output_if) -- (file_output);
+
+\end{tikzpicture}
+\caption{Modular Architecture: Interface Hierarchies}
+\label{fig:plugin_arch}
+\end{figure}
+
+\textbf{Key advantages of the factory pattern:}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Decoupling:} Core logic independent of hardware specifics
+    \item \textbf{Extensibility:} New sensors/outputs added by implementing interface and updating factory
+    \item \textbf{Testability:} File-based implementations enable unit tests and CI/CD
+    \item \textbf{Configurability:} Hardware selection at runtime via JSON (no config changes in code)
+\end{enumerate}
+
+\textbf{Note on Future Enhancement:} While the current implementation uses a factory pattern with static compilation, the interface design enables future migration to a true \textbf{plugin architecture} with dynamic loading (shared libraries). This would allow adding new sensor/output types without recompiling the daemon.
+
+\subsection{Error Handling and Resilience}
+
+All sensor and output implementations include robust error handling:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Initialization failures:} Logged and reported; daemon continues with degraded mode if possible
+    \item \textbf{Transient read errors:} Retried with backoff; use last known good value
+    \item \textbf{Persistent failures:} Mark component as non-operational; alert via logging
+    \item \textbf{Graceful degradation:} If sensor fails, hold last brightness; if output fails, log error but continue operation
+\end{itemize}
+
+\subsection{Summary}
+
+The modular architecture provides:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{4 sensor types:} OPT4001, FPGA-OPT4001, CAN ALS, File
+    \item \textbf{4 output types:} DDC/CI, I2C Dimmer, CAN, File
+    \item \textbf{Clean interfaces:} Uniform API for all implementations
+    \item \textbf{Runtime configuration:} JSON-driven hardware selection
+    \item \textbf{Test-friendly:} File-based implementations for automated testing
+\end{itemize}
+
+The next section explores the zone controller and brightness calculation logic.

@@ -1,0 +1,145 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,calc}
+
+% Page layout settings
+\geometry{left=1in,right=1in,bottom=1in,top=1.5in,headheight=50pt,headsep=1.5cm}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+% Graphics path setting
+\graphicspath{{../images/}}
+
+% Listings settings for code blocks
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    xleftmargin=0.5cm,
+    xrightmargin=0.5cm,
+    aboveskip=1em,
+    belowskip=1em,
+    columns=flexible,
+    keepspaces=true,
+    showstringspaces=false
+}
+
+% Header and footer setup
+\pagestyle{fancy}
+\fancyhead{}
+\fancyfoot{}
+
+% Define header content
+\fancyhead[L]{ALS-Dimmer: Adaptive Brightness Control}
+\fancyhead[R]{\raisebox{0.15cm}{\includegraphics[width=2.5cm]{logo.png}}}
+
+% Define footer content
+\fancyfoot[C]{\thepage}
+\fancyfoot[L]{Rev 1.1 -- November 2025}
+\fancyfoot[R]{}
+
+% Header/footer lines
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% Hyperref settings
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue,
+    pdftitle={ALS-Dimmer: Adaptive Brightness Control Design \& Implementation},
+    pdfauthor={Albert David}
+}
+
+% Custom colors for zones and elements
+\definecolor{nightzone}{RGB}{100,150,255}
+\definecolor{indoorzone}{RGB}{100,200,100}
+\definecolor{outdoorzone}{RGB}{255,180,50}
+\definecolor{codeblock}{RGB}{240,240,240}
+
+%------------------------
+% Document starts here
+%------------------------
+\begin{document}
+\thispagestyle{fancy}
+
+\vspace*{3cm}
+
+\begin{center}
+    {\huge\bfseries ALS-Dimmer}\\[1ex]
+    {\Large Adaptive Brightness Control}\\[0.5ex]
+    {\Large Design \& Implementation}\\[2ex]
+    {\large Author: Albert David}\\[2ex]
+    {\large Version 1.1}\\[1ex]
+    November 2025\\[2ex]
+    {\normalsize A Technical Guide for Display Integration}
+\end{center}
+\vspace{2em}
+
+\section*{Document Revision History}
+\begin{longtable}{|p{0.12\textwidth}|p{0.18\textwidth}|p{0.15\textwidth}|p{0.45\textwidth}|}
+    \hline
+    \textbf{Version} & \textbf{Date} & \textbf{Author} & \textbf{Description} \\
+    \hline
+    1.0 & November 9, 2025 & Albert David & Initial release - Complete design specification and implementation guide for adaptive brightness control systems \\
+    \hline
+    1.1 & November 16, 2025 & Albert David & Minor updates - Updated the document and code to reflect \texttt{MANUAL\_TEMPORARY} state of control loop as read-only \\
+    \hline
+\end{longtable}
+
+\clearpage
+
+\tableofcontents
+
+\clearpage
+
+%------------------------
+% Part I: Fundamentals
+%------------------------
+\part{Fundamentals of Adaptive Brightness Control}
+
+\input{01-introduction}
+\input{02-environments}
+\input{03-human-vision}
+\input{04-zone-mapping}
+\input{05-curves}
+\input{06-response-time}
+
+\clearpage
+
+%------------------------
+% Part II: Implementation
+%------------------------
+\part{ALS-Dimmer Implementation}
+
+\input{07-architecture}
+\input{08-components}
+\input{09-zone-controller}
+\input{10-json-config}
+\input{11-control-interface}
+%\input{12-deployment}
+%\input{13-summary}
+
+\clearpage
+
+%------------------------
+% Appendices
+%------------------------
+%\input{appendices}
+
+\end{document}

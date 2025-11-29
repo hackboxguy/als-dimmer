@@ -1,0 +1,509 @@
+%------------------------
+% Section 10: JSON Configuration Format
+%------------------------
+\section{JSON Configuration Format}
+
+ALS-Dimmer is entirely configured through a single JSON file. This section details the configuration structure and provides complete working examples.
+
+\subsection{Top-Level Configuration Structure}
+
+The configuration file has four main sections:
+
+\begin{lstlisting}[caption={Top-Level Configuration Structure}]
+{
+    "sensor": { /* Sensor configuration */ },
+    "output": { /* Output configuration */ },
+    "zones": [ /* Array of zone definitions */ ],
+    "control": { /* Control loop parameters */ }
+}
+\end{lstlisting}
+
+\subsection{Sensor Configuration Examples}
+
+\subsubsection{OPT4001 I2C Sensor}
+
+\begin{lstlisting}[caption={OPT4001 Sensor Configuration}]
+"sensor": {
+    "type": "opti4001",
+    "device": "/dev/i2c-1",
+    "address": "0x44"
+}
+\end{lstlisting}
+
+\textbf{Supported I2C sensor types:} \texttt{opti4001}, \texttt{veml7700}, \texttt{fpga\_opti4001}, \texttt{custom\_i2c}
+
+\textbf{Note:} Sensor read rate is controlled by \texttt{control.update\_interval\_ms} (Section 10.4).
+
+\subsubsection{CAN ALS Sensor}
+
+\begin{lstlisting}[caption={CAN ALS Sensor Configuration}]
+"sensor": {
+    "type": "can_als",
+    "can_interface": "can0",
+    "can_id": "0x0A2",
+    "timeout_ms": 1000
+}
+\end{lstlisting}
+
+\textbf{Protocol:} The CAN ALS sensor uses a fixed 8-byte protocol (compatible with ESP32-based ALS transmitters):
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Bytes 0--2:} 24-bit lux value (little-endian, range: 0--16,777,215)
+    \item \textbf{Byte 3:} Status byte (\texttt{0x00}=OK, \texttt{0x01}=Error)
+    \item \textbf{Byte 4:} Sequence counter (0--255)
+    \item \textbf{Byte 5:} Configuration index
+    \item \textbf{Bytes 6--7:} 16-bit checksum (little-endian)
+\end{itemize}
+
+\textbf{Parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{can\_interface}: SocketCAN interface name (e.g., \texttt{can0}, \texttt{vcan0})
+    \item \texttt{can\_id}: CAN message ID in hex format (e.g., \texttt{0x0A2})
+    \item \texttt{timeout\_ms}: Timeout for considering data stale (default: 5000ms, recommended: 3--4$\times$ message interval)
+\end{itemize}
+
+\textbf{Performance tuning:} For responsive brightness adaptation, configure the CAN transmitter to send messages at the same rate as \texttt{control.update\_interval\_ms} (typically 200--300~ms). This ensures fresh sensor data for every control loop iteration. Set \texttt{timeout\_ms} to 3--4$\times$ the message interval:
+\begin{itemize}[leftmargin=*]
+    \item 200~ms message interval $\rightarrow$ \texttt{timeout\_ms}: 600--800~ms
+    \item 250~ms message interval $\rightarrow$ \texttt{timeout\_ms}: 750--1000~ms
+    \item Conservative default: 5000~ms (tolerates up to 5-second gaps)
+\end{itemize}
+
+\textbf{Example:} For CAN message ID \texttt{0x0A2} with bytes \texttt{[E8 03 00 00 42 01 A3 5C]}:
+\begin{itemize}[leftmargin=*]
+    \item Lux value: \texttt{0x0003E8} = 1000.0 lux (little-endian 24-bit)
+    \item Status: \texttt{0x00} = OK
+    \item Sequence: \texttt{0x42} = 66
+\end{itemize}
+
+\subsubsection{File Sensor (Testing)}
+
+\begin{lstlisting}[caption={File Sensor Configuration}]
+"sensor": {
+    "type": "file",
+    "file_path": "/tmp/ambient_lux.txt"
+}
+\end{lstlisting}
+
+\textbf{Usage:} Write a single floating-point lux value to the file (e.g., \texttt{echo "123.45" > /tmp/ambient\_lux.txt}). Useful for automated testing and simulation.
+
+\subsection{Output Configuration Examples}
+
+\subsubsection{DDC/CI Output (libddcutil)}
+
+\begin{lstlisting}[caption={DDC/CI Output Configuration}]
+"output": {
+    "type": "ddcutil",
+    "display_number": 0
+}
+\end{lstlisting}
+
+\textbf{Parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{display\_number}: Display index (0 = first detected display, 1 = second, etc.)
+\end{itemize}
+
+\textbf{Note:} VCP feature code 0x10 (brightness) is used automatically. Requires \texttt{libddcutil} and appropriate I2C permissions.
+
+\subsubsection{I2C Dimmer Output}
+
+ALS-Dimmer supports two I2C dimmer types with different brightness ranges:
+
+\begin{lstlisting}[caption={Dimmer200 Configuration (0--200 range)}]
+"output": {
+    "type": "dimmer200",
+    "device": "/dev/i2c-1",
+    "address": "0x1D"
+}
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Dimmer800 Configuration (0--800 range)}]
+"output": {
+    "type": "dimmer800",
+    "device": "/dev/i2c-1",
+    "address": "0x1D"
+}
+\end{lstlisting}
+
+\textbf{Parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{type}: Either \texttt{dimmer200} (0--200 range) or \texttt{dimmer800} (0--800 range)
+    \item \texttt{device}: I2C device path (e.g., \texttt{/dev/i2c-1})
+    \item \texttt{address}: I2C slave address in hex format (e.g., \texttt{0x1D})
+\end{itemize}
+
+\textbf{Brightness mapping:} Percent value (0--100) is linearly scaled to the dimmer's native range:
+\begin{itemize}[leftmargin=*]
+    \item \texttt{dimmer200}: $\text{value} = \lfloor (\text{percent} / 100) \times 200 \rfloor$
+    \item \texttt{dimmer800}: $\text{value} = \lfloor (\text{percent} / 100) \times 800 \rfloor$
+\end{itemize}
+
+Example (dimmer200): 75\% brightness $\rightarrow$ native value = $\lfloor 0.75 \times 200 \rfloor = 150$
+
+\subsubsection{File Output (Testing)}
+
+\begin{lstlisting}[caption={File Output Configuration}]
+"output": {
+    "type": "file",
+    "file_path": "/tmp/als_brightness.txt"
+}
+\end{lstlisting}
+
+\textbf{Usage:} Writes brightness value (0--100) to the specified file. Useful for automated testing and simulation. Pair with file sensor for complete software-in-the-loop testing.
+
+\subsection{Zone Definitions}
+
+Zones are defined as an array of objects. Each zone specifies a lux range, target brightness range, mapping curve, and adaptive step sizes. Example with 3 zones:
+
+\begin{lstlisting}[caption={Zone Definitions}, basicstyle=\ttfamily\scriptsize]
+"zones": [
+    {
+        "name": "night",
+        "lux_range": [0, 10],
+        "brightness_range": [5, 30],
+        "curve": "logarithmic",
+        "step_sizes": {
+            "large_up": 5, "large_down": 3,
+            "medium_up": 2, "medium_down": 1,
+            "small_up": 1, "small_down": 1
+        },
+        "error_thresholds": {"large": 20, "small": 5}
+    },
+    {
+        "name": "indoor",
+        "lux_range": [10, 500],
+        "brightness_range": [30, 70],
+        "curve": "linear",
+        "step_sizes": {
+            "large_up": 8, "large_down": 4,
+            "medium_up": 3, "medium_down": 2,
+            "small_up": 1, "small_down": 1
+        },
+        "error_thresholds": {"large": 25, "small": 8}
+    },
+    {
+        "name": "outdoor",
+        "lux_range": [500, 100000],
+        "brightness_range": [70, 100],
+        "curve": "logarithmic",
+        "step_sizes": {
+            "large_up": 10, "large_down": 5,
+            "medium_up": 4, "medium_down": 2,
+            "small_up": 2, "small_down": 1
+        },
+        "error_thresholds": {"large": 30, "small": 10}
+    }
+]
+\end{lstlisting}
+
+\textbf{Zone Parameters:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{name}: Zone identifier for logging
+    \item \texttt{lux\_range}: [min, max] lux boundaries for this zone
+    \item \texttt{brightness\_range}: [min, max] target brightness (0--100) for this zone
+    \item \texttt{curve}: Mapping function - \texttt{linear} or \texttt{logarithmic}
+    \item \texttt{step\_sizes}: Adaptive step sizes (percent) for brightness changes:
+        \begin{itemize}
+            \item \texttt{large\_up} / \texttt{large\_down}: Steps when error $>$ \texttt{error\_thresholds.large}
+            \item \texttt{medium\_up} / \texttt{medium\_down}: Steps when \texttt{small} $<$ error $<$ \texttt{large}
+            \item \texttt{small\_up} / \texttt{small\_down}: Steps when error $<$ \texttt{error\_thresholds.small}
+        \end{itemize}
+\item \texttt{error\_thresholds}: Thresholds (percent) for step size selection
+\end{itemize}
+
+\textbf{Display calibration note:} The \texttt{brightness\_range} values assume that a command of ``X\%'' maps linearly (or has already been calibrated) to actual panel luminance. If the connected display has a highly non-linear PWM-to-nits transfer curve, add a calibration LUT or adjust the hardware driver so that ALS-Dimmer's percentages produce predictable brightness steps.
+
+\textbf{Zone boundaries:} Must be contiguous and non-overlapping. The upper bound of one zone should equal the lower bound of the next.
+
+\textbf{Asymmetric step sizes:} The \texttt{\_up} and \texttt{\_down} suffixes enable different rates for brightness increases vs. decreases. Typically, \texttt{down} steps are smaller to avoid jarring sudden dimming.
+
+\subsection{Control Loop Parameters}
+
+\begin{lstlisting}[caption={Control Loop Configuration}, basicstyle=\ttfamily\scriptsize]
+"control": {
+    "tcp_socket": {
+        "enabled": true,
+        "listen_address": "127.0.0.1",
+        "listen_port": 9000
+    },
+    "unix_socket": {
+        "enabled": true,
+        "path": "/tmp/als-dimmer.sock",
+        "permissions": "0660",
+        "owner": "root",
+        "group": "root"
+    },
+    "update_interval_ms": 500,
+    "hysteresis_percent": 5.0,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/tmp/als-dimmer-state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info"
+}
+\end{lstlisting}
+
+\textbf{Parameter descriptions:}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{tcp\_socket}: TCP control interface configuration
+        \begin{itemize}
+            \item \texttt{enabled}: Enable TCP socket listener
+            \item \texttt{listen\_address}: IP address to bind (e.g., \texttt{127.0.0.1} for localhost)
+            \item \texttt{listen\_port}: Port number (e.g., 9000)
+        \end{itemize}
+    \item \texttt{unix\_socket}: Unix domain socket configuration
+        \begin{itemize}
+            \item \texttt{enabled}: Enable Unix socket listener
+            \item \texttt{path}: Socket file path (e.g., \texttt{/tmp/als-dimmer.sock})
+            \item \texttt{permissions}: Octal permission string (e.g., \texttt{0660})
+            \item \texttt{owner} / \texttt{group}: Socket ownership
+        \end{itemize}
+    \item \texttt{update\_interval\_ms}: Time between control loop iterations (200--500 ms typical)
+    \item \texttt{hysteresis\_percent}: Zone boundary hysteresis to prevent oscillation (5--10\% typical)
+    \item \texttt{sensor\_error\_timeout\_sec}: Time before falling back on sensor errors (300 sec typical)
+    \item \texttt{fallback\_brightness}: Brightness to use when sensor fails (0--100)
+    \item \texttt{state\_file}: Path to save persistent state (mode, manual brightness)
+    \item \texttt{auto\_resume\_timeout\_sec}: Timeout for AUTO\_RESUME mode (60 sec typical)
+    \item \texttt{log\_level}: Logging verbosity - \texttt{trace}, \texttt{debug}, \texttt{info}, \texttt{warn}, \texttt{error}
+\end{itemize}
+
+\subsection{Complete Working Examples}
+
+\subsubsection{Example 1: OPT4001 Sensor with DDC/CI Monitor}
+
+\begin{lstlisting}[caption={OPT4001 + DDC/CI Configuration}, basicstyle=\ttfamily\tiny]
+{
+    "sensor": {
+        "type": "opti4001",
+        "device": "/dev/i2c-1",
+        "address": "0x44"
+    },
+    "output": {
+        "type": "ddcutil",
+        "display_number": 0
+    },
+    "control": {
+        "tcp_socket": {
+            "enabled": true,
+            "listen_address": "127.0.0.1",
+            "listen_port": 9000
+        },
+        "unix_socket": {
+            "enabled": true,
+            "path": "/tmp/als-dimmer.sock",
+            "permissions": "0660",
+            "owner": "root",
+            "group": "root"
+        },
+        "update_interval_ms": 500,
+        "hysteresis_percent": 5.0,
+        "sensor_error_timeout_sec": 300,
+        "fallback_brightness": 50,
+        "state_file": "/tmp/als-dimmer-state.json",
+        "auto_resume_timeout_sec": 60,
+        "log_level": "info"
+    },
+    "zones": [
+        {
+            "name": "night",
+            "lux_range": [0, 10],
+            "brightness_range": [5, 30],
+            "curve": "logarithmic",
+            "step_sizes": {
+                "large_up": 5, "large_down": 3,
+                "medium_up": 2, "medium_down": 1,
+                "small_up": 1, "small_down": 1
+            },
+            "error_thresholds": {"large": 20, "small": 5}
+        },
+        {
+            "name": "indoor",
+            "lux_range": [10, 500],
+            "brightness_range": [30, 70],
+            "curve": "linear",
+            "step_sizes": {
+                "large_up": 8, "large_down": 4,
+                "medium_up": 3, "medium_down": 2,
+                "small_up": 1, "small_down": 1
+            },
+            "error_thresholds": {"large": 25, "small": 8}
+        },
+        {
+            "name": "outdoor",
+            "lux_range": [500, 100000],
+            "brightness_range": [70, 100],
+            "curve": "logarithmic",
+            "step_sizes": {
+                "large_up": 10, "large_down": 5,
+                "medium_up": 4, "medium_down": 2,
+                "small_up": 2, "small_down": 1
+            },
+            "error_thresholds": {"large": 30, "small": 10}
+        }
+    ]
+}
+\end{lstlisting}
+
+\subsubsection{Example 2: OPT4001 Sensor with I2C Dimmer200}
+
+\begin{lstlisting}[caption={OPT4001 + Dimmer200 Configuration}, basicstyle=\ttfamily\tiny]
+{
+    "sensor": {
+        "type": "opti4001",
+        "device": "/dev/i2c-1",
+        "address": "0x44"
+    },
+    "output": {
+        "type": "dimmer200",
+        "device": "/dev/i2c-1",
+        "address": "0x1D"
+    },
+    "control": {
+        "tcp_socket": {
+            "enabled": true,
+            "listen_address": "127.0.0.1",
+            "listen_port": 9000
+        },
+        "unix_socket": {
+            "enabled": true,
+            "path": "/tmp/als-dimmer.sock",
+            "permissions": "0660",
+            "owner": "root",
+            "group": "root"
+        },
+        "update_interval_ms": 500,
+        "sensor_error_timeout_sec": 300,
+        "fallback_brightness": 50,
+        "state_file": "/tmp/als-dimmer-state.json",
+        "auto_resume_timeout_sec": 60,
+        "log_level": "info"
+    },
+    "zones": [
+        {
+            "name": "night",
+            "lux_range": [0, 10],
+            "brightness_range": [5, 30],
+            "curve": "logarithmic",
+            "step_sizes": {"large": 5, "medium": 2, "small": 1},
+            "error_thresholds": {"large": 20, "small": 5}
+        },
+        {
+            "name": "indoor",
+            "lux_range": [10, 500],
+            "brightness_range": [30, 70],
+            "curve": "linear",
+            "step_sizes": {"large": 8, "medium": 3, "small": 1},
+            "error_thresholds": {"large": 25, "small": 8}
+        },
+        {
+            "name": "outdoor",
+            "lux_range": [500, 100000],
+            "brightness_range": [70, 100],
+            "curve": "logarithmic",
+            "step_sizes": {"large": 10, "medium": 4, "small": 2},
+            "error_thresholds": {"large": 30, "small": 10}
+        }
+    ]
+}
+\end{lstlisting}
+
+\textbf{Note:} This example uses symmetric step sizes (no \texttt{\_up}/\texttt{\_down} suffixes). Both formats are supported.
+
+\subsubsection{Example 3: File-Based Testing Configuration}
+
+\begin{lstlisting}[caption={File-Based Test Configuration}, basicstyle=\ttfamily\tiny]
+{
+    "sensor": {
+        "type": "file",
+        "file_path": "/tmp/als_lux.txt"
+    },
+    "output": {
+        "type": "file",
+        "file_path": "/tmp/als_brightness.txt"
+    },
+    "control": {
+        "tcp_socket": {
+            "enabled": true,
+            "listen_address": "127.0.0.1",
+            "listen_port": 9000
+        },
+        "unix_socket": {
+            "enabled": true,
+            "path": "/tmp/als-dimmer.sock",
+            "permissions": "0660",
+            "owner": "root",
+            "group": "root"
+        },
+        "update_interval_ms": 500,
+        "sensor_error_timeout_sec": 300,
+        "fallback_brightness": 50,
+        "state_file": "/tmp/als-dimmer-state.json",
+        "auto_resume_timeout_sec": 60,
+        "log_level": "debug"
+    },
+    "zones": [
+        {
+            "name": "night",
+            "lux_range": [0, 10],
+            "brightness_range": [5, 30],
+            "curve": "logarithmic",
+            "step_sizes": {"large": 5, "medium": 2, "small": 1},
+            "error_thresholds": {"large": 20, "small": 5}
+        },
+        {
+            "name": "indoor",
+            "lux_range": [10, 500],
+            "brightness_range": [30, 70],
+            "curve": "linear",
+            "step_sizes": {"large": 8, "medium": 3, "small": 1},
+            "error_thresholds": {"large": 25, "small": 8}
+        },
+        {
+            "name": "outdoor",
+            "lux_range": [500, 100000],
+            "brightness_range": [70, 100],
+            "curve": "logarithmic",
+            "step_sizes": {"large": 10, "medium": 4, "small": 2},
+            "error_thresholds": {"large": 30, "small": 10}
+        }
+    ]
+}
+\end{lstlisting}
+
+\textbf{Usage:} Ideal for software-in-the-loop testing and CI/CD pipelines. Write lux values to \texttt{/tmp/als\_lux.txt}, read brightness results from \texttt{/tmp/als\_brightness.txt}. Use \texttt{log\_level: "debug"} for detailed tracing.
+
+\subsection{Configuration Validation}
+
+ALS-Dimmer validates the configuration file at startup:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{JSON syntax:} Must be valid JSON
+    \item \textbf{Required fields:} All mandatory fields present
+    \item \textbf{Type checking:} Values match expected types (string, number, etc.)
+    \item \textbf{Range validation:} Brightness values in [0, 100], lux $\geq 0$, etc.
+    \item \textbf{Zone continuity:} Zones cover the full lux range without gaps or overlaps
+\end{itemize}
+
+If validation fails, the daemon logs detailed error messages and exits.
+
+\subsection{Configuration Best Practices}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Start with reference configs:} Modify existing examples rather than writing from scratch
+    \item \textbf{Test with file interfaces:} Validate zone curves before deploying to hardware
+    \item \textbf{Use comments (non-standard):} Some JSON parsers support comments for documentation
+    \item \textbf{Version control:} Track config files in git alongside code
+    \item \textbf{Application-specific tuning:} Automotive needs faster transitions than home displays
+\end{enumerate}
+
+\subsection{Summary}
+
+The JSON configuration system provides:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Complete hardware abstraction:} No code changes for different setups
+    \item \textbf{Human-readable format:} Easy to understand and modify
+    \item \textbf{Validation at startup:} Catches errors before deployment
+    \item \textbf{Flexible zone definitions:} Fully customizable curves and transition parameters
+\end{itemize}
+
+The next section describes the runtime control interface for interacting with the daemon.

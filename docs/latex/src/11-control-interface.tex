@@ -1,0 +1,346 @@
+%------------------------
+% Section 11: Control Interface
+%------------------------
+\section{Runtime Control Interface}
+
+ALS-Dimmer provides a JSON-based control interface over TCP and Unix domain sockets, enabling runtime interaction from user applications, HMI frameworks, and command-line tools.
+
+\subsection{Socket Configuration}
+
+The daemon can be configured to listen on multiple socket types:
+
+\begin{lstlisting}[caption={Socket Configuration}]
+"control_interface": {
+    "tcp": {
+        "enabled": true,
+        "port": 9000,
+        "bind_address": "127.0.0.1"
+    },
+    "unix": {
+        "enabled": true,
+        "socket_path": "/tmp/als-dimmer.sock"
+    }
+}
+\end{lstlisting}
+
+\textbf{Typical usage patterns:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{TCP socket:} Development, testing, remote access
+    \item \textbf{Unix domain socket:} Production IPC with Android/QNX HMI frameworks (lower latency, better security)
+\end{itemize}
+
+\subsection{Protocol: JSON v1.0}
+
+All commands and responses use JSON format.
+
+\subsubsection{Command Structure}
+
+\begin{lstlisting}[caption={Command Format}]
+{
+    "version": "1.0",
+    "command": "COMMAND_NAME",
+    "params": { /* Optional command-specific parameters */ }
+}
+\end{lstlisting}
+
+\subsubsection{Response Structure}
+
+\begin{lstlisting}[caption={Response Format}]
+{
+    "version": "1.0",
+    "status": "success" | "error",
+    "data": { /* Response data */ },
+    "error": "Error message if status is error"
+}
+\end{lstlisting}
+
+\subsection{Available Commands}
+
+\subsubsection{1. GET\_STATUS}
+
+Query current daemon status, brightness, mode, and sensor reading.
+
+\textbf{Request:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "command": "get_status"
+}
+\end{lstlisting}
+
+\textbf{Response:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "status": "success",
+    "data": {
+        "mode": "auto",
+        "current_brightness": 45,
+        "target_brightness": 50,
+        "current_lux": 120.5,
+        "current_zone": "indoor",
+        "sensor_operational": true,
+        "output_operational": true
+    }
+}
+\end{lstlisting}
+
+\subsubsection{2. SET\_MODE}
+
+Change operating mode (AUTO, MANUAL). The transient \texttt{MANUAL\_TEMPORARY} state is managed by the daemon and cannot be requested directly; attempts to set it are rejected with an \texttt{INVALID\_PARAMS} error.
+
+\textbf{Request:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "command": "set_mode",
+    "params": {
+        "mode": "manual"
+    }
+}
+\end{lstlisting}
+
+\textbf{Valid modes:} \texttt{"auto"}, \texttt{"manual"} (requests for \texttt{"manual\_temporary"} are rejected)
+
+\textbf{Response:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "status": "success",
+    "data": {
+        "mode": "manual"
+    }
+}
+\end{lstlisting}
+
+\subsubsection{3. SET\_BRIGHTNESS}
+
+Set brightness to specific value. If the control loop is currently in \texttt{AUTO}, this command triggers the read-only \texttt{MANUAL\_TEMPORARY} state (auto-resume timer starts); when already in \texttt{MANUAL}, the mode stays manual.
+
+\textbf{Request:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "command": "set_brightness",
+    "params": {
+        "brightness": 75
+    }
+}
+\end{lstlisting}
+
+\textbf{Valid range:} 0--100 (integer)
+
+\textbf{Response:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "status": "success",
+    "data": {
+        "brightness": 75,
+        "mode": "manual_temporary"
+    }
+}
+\end{lstlisting}
+
+\subsubsection{4. ADJUST\_BRIGHTNESS}
+
+Adjust brightness by delta. Like \texttt{set\_brightness}, invoking this while in \texttt{AUTO} transitions the daemon into \texttt{MANUAL\_TEMPORARY}; if already in \texttt{MANUAL}, the mode does not change.
+
+\textbf{Request:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "command": "adjust_brightness",
+    "params": {
+        "delta": 10
+    }
+}
+\end{lstlisting}
+
+\textbf{Delta range:} -100 to +100 (integer). Result is clamped to [0, 100].
+
+\textbf{Response:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "status": "success",
+    "data": {
+        "brightness": 55,
+        "mode": "manual_temporary"
+    }
+}
+\end{lstlisting}
+
+\textbf{Use case:} User presses brightness up/down buttons on steering wheel or display. System adjusts brightness but reverts to AUTO after timeout; clients do not (and cannot) explicitly request \texttt{MANUAL\_TEMPORARY}.
+
+\subsubsection{5. GET\_CONFIG}
+
+Retrieve current configuration (zones, control parameters).
+
+\textbf{Request:}
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "command": "get_config"
+}
+\end{lstlisting}
+
+\textbf{Response:}
+\begin{lstlisting}[basicstyle=\ttfamily\scriptsize]
+{
+    "version": "1.0",
+    "status": "success",
+    "data": {
+        "zones": [
+            {
+                "name": "night",
+                "min_lux": 0.0,
+                "max_lux": 5.0,
+                "curve_type": "linear",
+                "min_brightness": 5,
+                "max_brightness": 20,
+                "up_gain": 0.25,
+                "down_gain": 0.10
+            },
+            // ... additional zones
+        ],
+        "control": {
+            "loop_period_ms": 150,
+            "error_threshold": 0.5,
+            "min_step_size": 1.0,
+            "hysteresis_percent": 10.0,
+            "manual_timeout_seconds": 45
+        }
+    }
+}
+\end{lstlisting}
+
+\subsection{Error Responses}
+
+If a command fails, the daemon returns an error response:
+
+\begin{lstlisting}[]
+{
+    "version": "1.0",
+    "status": "error",
+    "error": "Invalid brightness value: 150 (must be 0-100)"
+}
+\end{lstlisting}
+
+\textbf{Common error conditions:}
+\begin{itemize}[leftmargin=*]
+    \item Invalid JSON syntax
+    \item Unknown command
+    \item Missing required parameters
+    \item Out-of-range values
+    \item Internal daemon error (sensor/output failure)
+\end{itemize}
+
+\subsection{Command-Line Examples}
+
+\subsubsection{Using netcat (nc) with TCP socket}
+
+\begin{lstlisting}[language=bash, caption={Query Status via TCP}]
+echo '{"version":"1.0","command":"get_status"}' | \
+    nc 127.0.0.1 9000
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash, caption={Set Brightness to 80\%}]
+echo '{"version":"1.0","command":"set_brightness",
+      "params":{"brightness":80}}' | \
+    nc 127.0.0.1 9000
+\end{lstlisting}
+
+\subsubsection{Using netcat with Unix socket}
+
+\begin{lstlisting}[language=bash, caption={Query Status via Unix Socket}]
+echo '{"version":"1.0","command":"get_status"}' | \
+    nc -U /tmp/als-dimmer.sock
+\end{lstlisting}
+
+\subsubsection{Using curl (if HTTP wrapper is available)}
+
+Some deployments wrap the socket interface with an HTTP server:
+
+\begin{lstlisting}[language=bash, caption={HTTP REST API (Custom Wrapper)}]
+curl -X POST http://localhost:8080/als-dimmer/status
+
+curl -X POST http://localhost:8080/als-dimmer/brightness \
+    -d '{"brightness": 60}'
+\end{lstlisting}
+
+\subsection{Integration with HMI Frameworks}
+
+\subsubsection{Android IVI Integration}
+
+Android applications can communicate via Unix socket using Java/Kotlin:
+
+\begin{lstlisting}[, caption={Android Integration (Java)}, basicstyle=\ttfamily\scriptsize]
+import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
+
+// Connect to daemon
+LocalSocket socket = new LocalSocket();
+socket.connect(new LocalSocketAddress(
+    "/tmp/als-dimmer.sock",
+    LocalSocketAddress.Namespace.FILESYSTEM));
+
+// Send command
+String command = "{\"version\":\"1.0\"," +
+                 "\"command\":\"get_status\"}";
+socket.getOutputStream().write(command.getBytes());
+
+// Read response
+byte[] buffer = new byte[4096];
+int len = socket.getInputStream().read(buffer);
+String response = new String(buffer, 0, len);
+
+// Parse JSON response
+JSONObject json = new JSONObject(response);
+int brightness = json.getJSONObject("data")
+                     .getInt("current_brightness");
+\end{lstlisting}
+
+\subsubsection{QNX Integration}
+
+QNX applications use similar Unix socket approach with POSIX APIs.
+
+\subsection{Security Considerations}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Unix socket permissions:} Typically 0660 (owner + group only)
+    \item \textbf{TCP bind address:} Bind to 127.0.0.1 (localhost only) in production
+    \item \textbf{Authentication:} Future enhancement (v2.0 protocol may add token-based auth)
+    \item \textbf{Rate limiting:} Daemon rejects excessive command rates to prevent abuse
+\end{itemize}
+
+\subsection{Protocol Versioning}
+
+The \texttt{version} field enables protocol evolution:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{v1.0:} Current protocol as described
+    \item \textbf{Future versions:} May add new commands, deprecate old ones
+    \item \textbf{Backward compatibility:} Daemon should support older protocol versions when feasible
+\end{itemize}
+
+\subsection{Summary}
+
+The control interface provides:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Runtime control:} Mode changes, brightness adjustments, status queries
+    \item \textbf{Dual socket support:} TCP (development) and Unix (production)
+    \item \textbf{JSON protocol:} Human-readable, easy to integrate
+    \item \textbf{HMI integration:} Android, QNX, web UIs can control daemon
+    \item \textbf{Command-line access:} Simple testing with netcat
+\end{itemize}
+
+\subsection{Source Code Availability}
+
+The complete source code for the ALS-Dimmer system is available on github at:
+
+\url{https://github.com/hackboxguy/als-dimmer.git}
+
+
+%The next section covers deployment: building, installing, and running ALS-Dimmer in production.

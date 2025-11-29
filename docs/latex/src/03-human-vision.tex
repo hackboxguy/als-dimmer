@@ -1,0 +1,92 @@
+\section{Human Visual Perception}
+
+\subsection{Vision Modes}
+
+The human visual system operates in three distinct modes depending on ambient light levels:
+
+\begin{description}
+    \item[Photopic vision] ($>$3 cd/m², daylight conditions) -- Mediated by cone cells in the retina, enables color perception and high visual acuity. Optimal for reading, detail work, and color-critical tasks.
+
+    \item[Scotopic vision] ($<$0.01 cd/m², night conditions) -- Mediated by rod cells, provides monochrome vision with high sensitivity to light but poor spatial resolution. Night-adapted eyes can detect very dim sources.
+    
+    \item[Mesopic vision] (0.01--3 cd/m², twilight) -- Transition range where both rods and cones are active. Most automotive nighttime driving occurs in this range.
+\end{description}
+
+For display brightness control, the key insight is that photopic vision (cone-mediated) dominates in all practical use cases except extreme darkness. However, \textbf{adaptation between these modes takes time}, which drives asymmetric transition requirements.
+
+\subsection{Light Adaptation Mechanisms}
+
+The human eye adapts to changing light levels through two primary mechanisms:
+
+\textbf{1. Pupil Response (Fast)}
+\begin{itemize}[noitemsep]
+    \item \textbf{Constriction} (dark → bright): 100--500 ms
+    \item \textbf{Dilation} (bright → dark): 2--5 seconds to noticeably widen, followed by slower chemical processes
+    \item Provides ~16:1 dynamic range (2mm to 8mm diameter)
+\end{itemize}
+
+\textbf{2. Photochemical Adaptation (Slow)}
+\begin{itemize}[noitemsep]
+    \item Rhodopsin (rod photopigment) regeneration: 5--30 minutes
+    \item Enables vision from starlight to sunlight (~1,000,000:1 range)
+    \item Much slower than mechanical pupil response
+\end{itemize}
+
+\subsection{The Weber-Fechner Law}
+
+A fundamental principle of human perception states that perceived brightness changes are proportional to the \textbf{logarithm} of the actual physical brightness change:
+
+\begin{equation}
+\text{Perceived Brightness} \propto \log(\text{Physical Brightness})
+\label{eq:weber_fechner}
+\end{equation}
+
+\textbf{Practical implications:}
+\begin{itemize}[noitemsep]
+    \item Doubling brightness from 10\% to 20\% feels like the same increase as 50\% to 100\%
+    \item Linear brightness adjustments feel "wrong" -- large steps at low end, imperceptible at high end
+    \item Logarithmic mapping aligns with human perception for optimal user experience
+\end{itemize}
+
+\subsection{Asymmetric Adaptation Times}
+
+The most critical insight for display control design:
+
+\begin{center}
+\textbf{Dark → Bright adaptation is FAST (pupil constriction)}\\
+\textbf{Bright → Dark adaptation is SLOW (pupil dilation + chemistry)}
+\end{center}
+
+Table \ref{tab:adaptation_times} quantifies these differences:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|p{0.45\textwidth}|}
+\hline
+\textbf{Transition} & \textbf{Time} & \textbf{Display Brightness Strategy} \\
+\hline
+Tunnel exit & 100--500 ms & \textbf{Fast ramp up} (1--2 sec) prevents temporary blindness \\
+(Dark → Bright) & (pupil constriction) & Large step sizes, aggressive convergence \\
+\hline
+Tunnel entry & 2--30 min & \textbf{Slow ramp down} (3--6 sec) prevents glare \\
+(Bright → Dark) & (full adaptation) & Small step sizes, gradual convergence \\
+\hline
+\end{tabular}
+\caption{Human adaptation times and display control implications}
+\label{tab:adaptation_times}
+\end{table}
+
+\subsection{Design Requirements}
+
+These physiological constraints translate to specific engineering requirements:
+
+\begin{enumerate}
+    \item \textbf{Logarithmic mapping} in extreme ranges (night/outdoor) to match perception
+    \item \textbf{Linear mapping} acceptable in moderate ranges (indoor) for simplicity
+    \item \textbf{Asymmetric step sizing}: Large steps for brightening, small for dimming
+    \item \textbf{Temporal smoothing}: Prevent rapid oscillations that cause eye strain
+    \item \textbf{Minimum brightness}: Never fully black (safety, readability)
+    \item \textbf{Maximum brightness}: Panel capability, but consider power/thermal limits
+\end{enumerate}
+
+The next section introduces \textbf{zone-based mapping} as the solution that addresses all these requirements simultaneously.
