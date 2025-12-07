@@ -290,6 +290,10 @@ void Config::validate() const {
         if (sensor.can_id.empty()) {
             throw ConfigError("sensor.can_id is required for CAN sensor type");
         }
+    } else if (sensor.type == "fpga_opti4001_sysfs") {
+        if (sensor.device.empty()) {
+            throw ConfigError("sensor.device is required for fpga_opti4001_sysfs sensor type");
+        }
     } else {
         throw ConfigError("Unknown sensor type: " + sensor.type);
     }
@@ -311,6 +315,13 @@ void Config::validate() const {
     } else if (output.type == "file") {
         if (output.file_path.empty()) {
             throw ConfigError("output.file_path is required for file output type");
+        }
+    } else if (output.type == "fpga_sysfs_dimmer") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for fpga_sysfs_dimmer output type");
+        }
+        if (output.value_range.size() != 2 || output.value_range[1] <= 0) {
+            throw ConfigError("output.value_range must be [min, max] with max > 0 for fpga_sysfs_dimmer output type");
         }
     } else if (output.type == "can") {
         // CAN output validation (Phase 3)

@@ -23,9 +23,11 @@ set(CORE_SOURCES
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
     src/sensors/fpga_opti4001_sensor.cpp
+    src/sensors/fpga_opti4001_sysfs_sensor.cpp
     src/sensors/can_als_sensor.cpp
     src/outputs/file_output.cpp
     src/outputs/i2c_dimmer_output.cpp
+    src/outputs/fpga_sysfs_output.cpp
 )
 
 # Create executable

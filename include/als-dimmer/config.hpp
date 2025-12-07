@@ -10,10 +10,10 @@ namespace als_dimmer {
 // Configuration structures matching JSON schema
 
 struct SensorConfig {
-    std::string type;           // opti4001 | veml7700 | can_als | fpga_opti4001 | custom_i2c | file
+    std::string type;           // opti4001 | veml7700 | can_als | fpga_opti4001 | fpga_opti4001_sysfs | custom_i2c | file
     std::string device;         // For I2C sensors
     std::string address;        // For I2C sensors (hex string)
-    std::string file_path;      // For file sensor
+    std::string file_path;      // For file sensor and sysfs-based sensors
 
     // CAN-specific fields
     std::string can_interface;  // e.g., "can0"
@@ -21,17 +21,17 @@ struct SensorConfig {
     int timeout_ms = 5000;      // Timeout for considering data stale
 
     // Calibration/scaling factor for sensor readings
-    float scale_factor = 0.64f;  // Default for fpga_opti4001 (changed to 1.64 for calibration)
+    float scale_factor = 0.64f;  // Default for fpga_opti4001 (raw * scale_factor = lux)
 };
 
 struct OutputConfig {
-    std::string type;           // ddcutil | dimmer200 | dimmer800 | custom_i2c | can | file
+    std::string type;           // ddcutil | dimmer200 | dimmer800 | fpga_sysfs_dimmer | custom_i2c | can | file
     std::string device;         // For I2C/ddcutil
     int display_number = 0;     // For ddcutil
     std::string address;        // For custom I2C, dimmer200, dimmer800
-    std::string file_path;      // For file output
+    std::string file_path;      // For file output and sysfs-based outputs
 
-    // Range configuration
+    // Range configuration - value_range[1] is max hardware value (e.g., {0, 800} for fpga_sysfs_dimmer)
     std::vector<int> value_range = {0, 100};      // Device's native range
     std::vector<int> internal_range = {0, 100};   // Internal range (always 0-100)
 };

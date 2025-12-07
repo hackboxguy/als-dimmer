@@ -19,11 +19,13 @@ using json = nlohmann::json;
 
 namespace als_dimmer {
 
-// Forward declarations
+// Forward declarations - Sensors
 std::unique_ptr<SensorInterface> createFileSensor(const std::string& file_path);
 std::unique_ptr<SensorInterface> createOPTI4001Sensor(const std::string& device, const std::string& address);
 std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address, float scale_factor);
+std::unique_ptr<SensorInterface> createFPGAOpti4001SysfsSensor(const std::string& sysfs_path, float scale_factor);
 
+// Forward declarations - Outputs
 std::unique_ptr<OutputInterface> createFileOutput(const std::string& file_path);
 #ifdef HAVE_DDCUTIL
 std::unique_ptr<OutputInterface> createDDCUtilOutput(int display_number);
@@ -31,6 +33,7 @@ std::unique_ptr<OutputInterface> createDDCUtilOutput(int display_number);
 std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device,
                                                         uint8_t address,
                                                         const std::string& type);
+std::unique_ptr<OutputInterface> createFPGASysfsOutput(const std::string& sysfs_path, int max_value);
 
 } // namespace als_dimmer
 
@@ -50,6 +53,11 @@ std::unique_ptr<als_dimmer::SensorInterface> createSensor(const als_dimmer::Conf
             can_id,
             config.sensor.timeout_ms
         );
+    } else if (config.sensor.type == "fpga_opti4001_sysfs") {
+        return als_dimmer::createFPGAOpti4001SysfsSensor(
+            config.sensor.device,
+            config.sensor.scale_factor
+        );
     }
     LOG_ERROR("factory", "Unsupported sensor type: " << config.sensor.type);
     return nullptr;
@@ -68,6 +76,12 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
         // Parse I2C address from hex string (e.g., "0x1D" -> 0x1D)
         uint8_t address = static_cast<uint8_t>(std::stoul(config.output.address, nullptr, 16));
         return als_dimmer::createI2CDimmerOutput(config.output.device, address, config.output.type);
+    }
+    else if (config.output.type == "fpga_sysfs_dimmer") {
+        return als_dimmer::createFPGASysfsOutput(
+            config.output.device,
+            config.output.value_range[1]  // max hardware value
+        );
     }
     LOG_ERROR("factory", "Unsupported output type: " << config.output.type);
     return nullptr;
