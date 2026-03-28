@@ -60,6 +60,11 @@
     }
   ],
 
+  "notification": {
+    "enabled": true,
+    "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
+  },
+
   "calibration": {
     "enabled": false,
     "sample_duration_sec": 60,

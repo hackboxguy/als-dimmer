@@ -7,6 +7,7 @@
 #include "als-dimmer/csv_logger.hpp"
 #include "als-dimmer/logger.hpp"
 #include "als-dimmer/json_protocol.hpp"
+#include "als-dimmer/notifier.hpp"
 #include "als-dimmer/sensors/can_als_sensor.hpp"
 #include "json.hpp"
 #include <iostream>
@@ -117,7 +118,8 @@ std::string processCommand(const std::string& command,
                           std::chrono::steady_clock::time_point& manual_temp_start,
                           als_dimmer::ZoneMapper* zone_mapper,
                           bool& manual_override_occurred,
-                          std::string& manual_override_type) {
+                          std::string& manual_override_type,
+                          als_dimmer::Notifier& notifier) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -186,6 +188,7 @@ std::string processCommand(const std::string& command,
                     auto new_mode = als_dimmer::StateManager::stringToMode(mode_str);
                     state_mgr.setMode(new_mode);
                     LOG_INFO("main", "Mode set to: " << mode_str << " (JSON)");
+                    notifier.emitModeChanged(mode_str);
 
                     json data;
                     data["mode"] = mode_str;
@@ -214,9 +217,11 @@ std::string processCommand(const std::string& command,
                         state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
                         manual_temp_start = std::chrono::steady_clock::now();
                         LOG_INFO("main", "Switched to MANUAL_TEMPORARY mode (JSON)");
+                        notifier.emitModeChanged("manual_temporary");
                     } else if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
                         manual_temp_start = std::chrono::steady_clock::now();
                     }
+                    notifier.emitBrightnessChanged(brightness);
 
                     json data;
                     data["brightness"] = brightness;
@@ -242,9 +247,11 @@ std::string processCommand(const std::string& command,
                     if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
                         state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
                         manual_temp_start = std::chrono::steady_clock::now();
+                        notifier.emitModeChanged("manual_temporary");
                     } else if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
                         manual_temp_start = std::chrono::steady_clock::now();
                     }
+                    notifier.emitBrightnessChanged(new_brightness);
 
                     json data;
                     data["brightness"] = new_brightness;
@@ -380,6 +387,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Initialize notifier for state change callbacks
+    als_dimmer::Notifier notifier(config.notification);
+    if (config.notification.enabled && !config.notification.on_change_script.empty()) {
+        LOG_INFO("main", "Notification callback enabled: " << config.notification.on_change_script);
+    }
+
     // Initialize CSV logger if requested
     std::unique_ptr<als_dimmer::CSVLogger> csv_logger;
     if (!csv_file.empty()) {
@@ -431,7 +444,8 @@ int main(int argc, char* argv[]) {
             std::string response = processCommand(cmd, state_mgr, control, current_lux,
                                                   output->getCurrentBrightness(), manual_temp_start,
                                                   zone_mapper.get(),
-                                                  manual_override_occurred, manual_override_type);
+                                                  manual_override_occurred, manual_override_type,
+                                                  notifier);
             control.sendResponse(response);
 
             if (cmd == "SHUTDOWN") {
@@ -448,6 +462,7 @@ int main(int argc, char* argv[]) {
             if (elapsed >= config.control.auto_resume_timeout_sec) {
                 LOG_INFO("main", "Auto-resuming AUTO mode (timeout expired)");
                 state_mgr.setMode(als_dimmer::OperatingMode::AUTO);
+                notifier.emitModeChanged("auto");
             }
         }
 
@@ -482,6 +497,10 @@ int main(int argc, char* argv[]) {
                 // Apply brightness
                 output->setBrightness(transition_info.next_brightness);
                 state_mgr.setLastAutoBrightness(transition_info.next_brightness);
+
+                // Notify external tools of actual output changes
+                notifier.emitBrightnessChanged(transition_info.next_brightness);
+                notifier.emitZoneChanged(current_zone_name);
 
                 // CSV logging (AUTO mode)
                 if (csv_logger) {
@@ -549,6 +568,7 @@ int main(int argc, char* argv[]) {
             int manual_brightness = state_mgr.getManualBrightness();
             int current_brightness_before = output->getCurrentBrightness();
             output->setBrightness(manual_brightness);
+            notifier.emitBrightnessChanged(manual_brightness);
 
             std::string mode_str = als_dimmer::StateManager::modeToString(state_mgr.getMode());
             LOG_DEBUG("main", mode_str << ": Brightness=" << manual_brightness << "%");

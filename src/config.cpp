@@ -244,6 +244,18 @@ Config Config::loadFromFile(const std::string& filename) {
         config.zones.push_back(zone);
     }
 
+    // Parse notification configuration (optional)
+    if (j.contains("notification")) {
+        auto& notif_json = j["notification"];
+
+        if (notif_json.contains("enabled")) {
+            config.notification.enabled = notif_json["enabled"].get<bool>();
+        }
+        if (notif_json.contains("on_change_script")) {
+            config.notification.on_change_script = notif_json["on_change_script"].get<std::string>();
+        }
+    }
+
     // Parse calibration configuration (optional)
     if (j.contains("calibration")) {
         auto& calib_json = j["calibration"];

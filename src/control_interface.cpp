@@ -375,6 +375,36 @@ void ControlInterface::handleClient(int client_fd, SocketType socket_type) {
                 entry.command = line;
                 entry.client_fd = client_fd;
                 entry.socket_type = socket_type;
+
+                // Coalesce brightness commands: if the new command is a brightness
+                // command, drop any pending brightness commands from the queue so
+                // only the latest one survives (avoids sluggish step-through on
+                // rapid presses).
+                bool is_brightness_cmd = false;
+                try {
+                    auto parsed = protocol::parseCommand(line);
+                    is_brightness_cmd = (parsed.type == protocol::CommandType::SET_BRIGHTNESS ||
+                                         parsed.type == protocol::CommandType::ADJUST_BRIGHTNESS);
+                } catch (...) {
+                    // Parse failed — not a brightness command, push as-is
+                }
+
+                if (is_brightness_cmd) {
+                    command_queue_.erase(
+                        std::remove_if(command_queue_.begin(), command_queue_.end(),
+                            [](const CommandEntry& queued) {
+                                try {
+                                    auto cmd = protocol::parseCommand(queued.command);
+                                    return cmd.type == protocol::CommandType::SET_BRIGHTNESS ||
+                                           cmd.type == protocol::CommandType::ADJUST_BRIGHTNESS;
+                                } catch (...) {
+                                    return false;
+                                }
+                            }),
+                        command_queue_.end());
+                    LOG_DEBUG("ControlInterface", "Coalesced pending brightness commands");
+                }
+
                 command_queue_.push_back(entry);
             }
         }

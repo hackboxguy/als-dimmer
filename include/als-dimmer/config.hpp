@@ -102,6 +102,11 @@ struct ControlConfig {
     std::string log_level = "info";  // trace | debug | info | warn | error
 };
 
+struct NotificationConfig {
+    bool enabled = false;
+    std::string on_change_script;  // Path to callback script (empty = disabled)
+};
+
 struct CalibrationConfig {
     bool enabled = false;
     int sample_duration_sec = 60;
@@ -113,6 +118,7 @@ struct Config {
     OutputConfig output;
     ControlConfig control;
     std::vector<Zone> zones;
+    NotificationConfig notification;
     CalibrationConfig calibration;
 
     // Load configuration from JSON file
