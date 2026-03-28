@@ -380,29 +380,32 @@ void ControlInterface::handleClient(int client_fd, SocketType socket_type) {
                 // command, drop any pending brightness commands from the queue so
                 // only the latest one survives (avoids sluggish step-through on
                 // rapid presses).
-                bool is_brightness_cmd = false;
+                // Coalesce absolute brightness commands: if the new command is
+                // set_brightness, drop any pending set_brightness commands so
+                // only the latest one survives. adjust_brightness (relative
+                // delta) is never coalesced — dropping deltas loses accumulated
+                // increments.
+                bool is_set_brightness = false;
                 try {
                     auto parsed = protocol::parseCommand(line);
-                    is_brightness_cmd = (parsed.type == protocol::CommandType::SET_BRIGHTNESS ||
-                                         parsed.type == protocol::CommandType::ADJUST_BRIGHTNESS);
+                    is_set_brightness = (parsed.type == protocol::CommandType::SET_BRIGHTNESS);
                 } catch (...) {
                     // Parse failed — not a brightness command, push as-is
                 }
 
-                if (is_brightness_cmd) {
+                if (is_set_brightness) {
                     command_queue_.erase(
                         std::remove_if(command_queue_.begin(), command_queue_.end(),
                             [](const CommandEntry& queued) {
                                 try {
                                     auto cmd = protocol::parseCommand(queued.command);
-                                    return cmd.type == protocol::CommandType::SET_BRIGHTNESS ||
-                                           cmd.type == protocol::CommandType::ADJUST_BRIGHTNESS;
+                                    return cmd.type == protocol::CommandType::SET_BRIGHTNESS;
                                 } catch (...) {
                                     return false;
                                 }
                             }),
                         command_queue_.end());
-                    LOG_DEBUG("ControlInterface", "Coalesced pending brightness commands");
+                    LOG_DEBUG("ControlInterface", "Coalesced pending set_brightness commands");
                 }
 
                 command_queue_.push_back(entry);
