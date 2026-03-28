@@ -27,6 +27,13 @@ enum class SocketType {
     UNIX
 };
 
+// Returned by getNextCommand() so the caller can reply to the correct client
+struct QueuedCommand {
+    std::string command;
+    int client_fd = -1;
+    bool close_after_response = false;  // Caller should close FD after sending response
+};
+
 class ControlInterface {
 public:
     ControlInterface(const ControlConfig& config);
@@ -41,11 +48,11 @@ public:
     // Check if a command is available
     bool hasCommand();
 
-    // Get next command (blocking if none available)
-    std::string getNextCommand();
+    // Get next command with originating client FD
+    QueuedCommand getNextCommand();
 
-    // Send response to last client
-    void sendResponse(const std::string& response);
+    // Send response to a specific client
+    void sendResponseTo(int client_fd, const std::string& response);
 
     // Broadcast message to all connected clients
     void broadcast(const std::string& message);
@@ -83,6 +90,7 @@ private:
         std::string command;
         int client_fd;
         SocketType socket_type;
+        bool close_after_response;  // FD should be closed after response is sent
     };
     std::vector<CommandEntry> command_queue_;
     std::mutex queue_mutex_;

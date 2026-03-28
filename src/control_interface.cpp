@@ -414,7 +414,23 @@ void ControlInterface::handleClient(int client_fd, SocketType socket_type) {
     }
 
     LOG_DEBUG("ControlInterface", socket_type_str << " client disconnected");
-    close(client_fd);
+
+    // Check if there are still queued commands from this client.
+    // If so, mark them for deferred close — the main loop will close
+    // the FD after sending the response. Otherwise close now.
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        bool has_pending = false;
+        for (auto& entry : command_queue_) {
+            if (entry.client_fd == client_fd) {
+                entry.close_after_response = true;
+                has_pending = true;
+            }
+        }
+        if (!has_pending) {
+            close(client_fd);
+        }
+    }
 
     // Remove from client_fds_
     {
@@ -428,33 +444,43 @@ bool ControlInterface::hasCommand() {
     return !command_queue_.empty();
 }
 
-std::string ControlInterface::getNextCommand() {
+QueuedCommand ControlInterface::getNextCommand() {
     std::lock_guard<std::mutex> lock(queue_mutex_);
     if (command_queue_.empty()) {
-        return "";
+        return QueuedCommand{"", -1, false};
     }
 
-    std::string cmd = command_queue_.front().command;
+    QueuedCommand result;
+    result.command = command_queue_.front().command;
+    result.client_fd = command_queue_.front().client_fd;
+    result.close_after_response = command_queue_.front().close_after_response;
     command_queue_.erase(command_queue_.begin());
-    return cmd;
+    return result;
 }
 
-void ControlInterface::sendResponse(const std::string& response) {
+void ControlInterface::sendResponseTo(int client_fd, const std::string& response) {
     std::string msg = response + "\n";
+
+    if (client_fd >= 0) {
+        ssize_t sent = send(client_fd, msg.c_str(), msg.length(), MSG_NOSIGNAL);
+        if (sent < 0) {
+            LOG_ERROR("ControlInterface", "Failed to send to client fd " << client_fd << ": " << strerror(errno));
+        }
+    }
+}
+
+void ControlInterface::broadcast(const std::string& message) {
+    std::string msg = message + "\n";
 
     std::lock_guard<std::mutex> lock(clients_mutex_);
     for (int fd : client_fds_) {
         if (fd >= 0) {
             ssize_t sent = send(fd, msg.c_str(), msg.length(), MSG_NOSIGNAL);
             if (sent < 0) {
-                LOG_ERROR("ControlInterface", "Failed to send to client: " << strerror(errno));
+                LOG_ERROR("ControlInterface", "Failed to broadcast to client: " << strerror(errno));
             }
         }
     }
-}
-
-void ControlInterface::broadcast(const std::string& message) {
-    sendResponse(message);
 }
 
 void ControlInterface::updateStatus(const SystemStatus& status) {

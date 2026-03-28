@@ -15,6 +15,7 @@
 #include <thread>
 #include <chrono>
 #include <iomanip>
+#include <unistd.h>
 
 using json = nlohmann::json;
 
@@ -439,16 +440,19 @@ int main(int argc, char* argv[]) {
     while (!should_exit) {
         // Process TCP commands
         while (control.hasCommand()) {
-            std::string cmd = control.getNextCommand();
+            als_dimmer::QueuedCommand queued = control.getNextCommand();
 
-            std::string response = processCommand(cmd, state_mgr, control, current_lux,
+            std::string response = processCommand(queued.command, state_mgr, control, current_lux,
                                                   output->getCurrentBrightness(), manual_temp_start,
                                                   zone_mapper.get(),
                                                   manual_override_occurred, manual_override_type,
                                                   notifier);
-            control.sendResponse(response);
+            control.sendResponseTo(queued.client_fd, response);
+            if (queued.close_after_response && queued.client_fd >= 0) {
+                close(queued.client_fd);
+            }
 
-            if (cmd == "SHUTDOWN") {
+            if (queued.command == "SHUTDOWN") {
                 should_exit = true;
                 break;
             }
