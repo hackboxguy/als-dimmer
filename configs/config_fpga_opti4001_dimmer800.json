@@ -28,7 +28,7 @@
     "update_interval_ms": 500,
     "sensor_error_timeout_sec": 300,
     "fallback_brightness": 50,
-    "state_file": "/tmp/als-dimmer-state.json",
+    "state_file": "/home/pi/als-dimmer/state.json",
     "auto_resume_timeout_sec": 60,
     "log_level": "info"
   },

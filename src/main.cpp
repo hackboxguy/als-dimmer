@@ -16,8 +16,18 @@
 #include <chrono>
 #include <iomanip>
 #include <unistd.h>
+#include <csignal>
+#include <atomic>
 
 using json = nlohmann::json;
+
+// Signal handler for clean shutdown (SIGTERM from systemd, SIGINT from Ctrl+C)
+static std::atomic<bool> g_shutdown_requested(false);
+
+static void signalHandler(int signum) {
+    (void)signum;
+    g_shutdown_requested.store(true);
+}
 
 namespace als_dimmer {
 
@@ -188,6 +198,7 @@ std::string processCommand(const std::string& command,
 
                     auto new_mode = als_dimmer::StateManager::stringToMode(mode_str);
                     state_mgr.setMode(new_mode);
+                    state_mgr.save();
                     LOG_INFO("main", "Mode set to: " << mode_str << " (JSON)");
                     notifier.emitModeChanged(mode_str);
 
@@ -223,6 +234,7 @@ std::string processCommand(const std::string& command,
                         manual_temp_start = std::chrono::steady_clock::now();
                     }
                     notifier.emitBrightnessChanged(brightness);
+                    state_mgr.save();
 
                     json data;
                     data["brightness"] = brightness;
@@ -253,6 +265,7 @@ std::string processCommand(const std::string& command,
                         manual_temp_start = std::chrono::steady_clock::now();
                     }
                     notifier.emitBrightnessChanged(new_brightness);
+                    state_mgr.save();
 
                     json data;
                     data["brightness"] = new_brightness;
@@ -418,6 +431,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Register signal handlers for clean shutdown
+    std::signal(SIGTERM, signalHandler);
+    std::signal(SIGINT, signalHandler);
+
     // Main control loop
     LOG_INFO("main", "Starting control loop (update interval: " << config.control.update_interval_ms << " ms)");
     LOG_INFO("main", "TCP control available on " << config.control.listen_address << ":" << config.control.listen_port);
@@ -437,7 +454,7 @@ int main(int argc, char* argv[]) {
     bool manual_override_occurred = false;
     std::string manual_override_type = "";
 
-    while (!should_exit) {
+    while (!should_exit && !g_shutdown_requested.load()) {
         // Process TCP commands
         while (control.hasCommand()) {
             als_dimmer::QueuedCommand queued = control.getNextCommand();
@@ -652,6 +669,9 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
+    if (g_shutdown_requested.load()) {
+        LOG_INFO("main", "Shutdown signal received, saving state");
+    }
     state_mgr.save();
     control.stop();
 
