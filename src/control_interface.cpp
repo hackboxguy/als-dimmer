@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <grp.h>
+#include <poll.h>
 #include <cstring>
 #include <algorithm>
 #include <iostream>
@@ -103,14 +104,15 @@ void ControlInterface::stop() {
 
     running_ = false;
 
-    // Close TCP server socket
+    // Shutdown server sockets to unblock accept() threads, then close
     if (tcp_server_fd_ >= 0) {
+        shutdown(tcp_server_fd_, SHUT_RDWR);
         close(tcp_server_fd_);
         tcp_server_fd_ = -1;
     }
 
-    // Close Unix server socket
     if (unix_server_fd_ >= 0) {
+        shutdown(unix_server_fd_, SHUT_RDWR);
         close(unix_server_fd_);
         unix_server_fd_ = -1;
     }
@@ -282,6 +284,14 @@ void ControlInterface::removeStaleUnixSocket() {
 
 void ControlInterface::acceptTcpClients() {
     while (running_) {
+        // Use poll() to wait for incoming connections with a timeout
+        // so we can check running_ periodically and not block shutdown
+        struct pollfd pfd = {tcp_server_fd_, POLLIN, 0};
+        int poll_ret = poll(&pfd, 1, 500); // 500ms timeout
+        if (poll_ret <= 0 || !running_) {
+            continue;
+        }
+
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
@@ -312,6 +322,14 @@ void ControlInterface::acceptTcpClients() {
 
 void ControlInterface::acceptUnixClients() {
     while (running_) {
+        // Use poll() to wait for incoming connections with a timeout
+        // so we can check running_ periodically and not block shutdown
+        struct pollfd pfd = {unix_server_fd_, POLLIN, 0};
+        int poll_ret = poll(&pfd, 1, 500); // 500ms timeout
+        if (poll_ret <= 0 || !running_) {
+            continue;
+        }
+
         struct sockaddr_un client_addr;
         socklen_t client_len = sizeof(client_addr);
 
