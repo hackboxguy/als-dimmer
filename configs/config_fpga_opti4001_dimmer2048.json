@@ -31,7 +31,7 @@
     "state_file": "/home/pi/als-dimmer/state.json",
     "auto_resume_timeout_sec": 60,
     "log_level": "info",
-    "minimal_i2c": false
+    "minimal_i2c": true
   },
 
   "zones": [
