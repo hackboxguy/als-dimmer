@@ -318,11 +318,11 @@ void Config::validate() const {
         throw ConfigError("output.type cannot be empty");
     }
 
-    if (output.type == "ddcutil" || output.type == "custom_i2c" || output.type == "dimmer200" || output.type == "dimmer800") {
+    if (output.type == "ddcutil" || output.type == "custom_i2c" || output.type == "dimmer200" || output.type == "dimmer800" || output.type == "dimmer2048") {
         if (output.device.empty()) {
             throw ConfigError("output.device is required for " + output.type + " output type");
         }
-        if (output.type == "dimmer200" || output.type == "dimmer800" || output.type == "custom_i2c") {
+        if (output.type == "dimmer200" || output.type == "dimmer800" || output.type == "dimmer2048" || output.type == "custom_i2c") {
             if (output.address.empty()) {
                 throw ConfigError("output.address is required for " + output.type + " output type");
             }

@@ -25,7 +25,7 @@ struct SensorConfig {
 };
 
 struct OutputConfig {
-    std::string type;           // ddcutil | dimmer200 | dimmer800 | fpga_sysfs_dimmer | custom_i2c | can | file
+    std::string type;           // ddcutil | dimmer200 | dimmer800 | dimmer2048 | fpga_sysfs_dimmer | custom_i2c | can | file
     std::string device;         // For I2C/ddcutil
     int display_number = 0;     // For ddcutil
     std::string address;        // For custom I2C, dimmer200, dimmer800

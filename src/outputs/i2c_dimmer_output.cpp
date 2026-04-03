@@ -21,8 +21,11 @@ I2CDimmerOutput::I2CDimmerOutput(const std::string& device, uint8_t address, Dim
     if (type_ == DimmerType::DIMMER_200) {
         max_native_brightness_ = 200;
         command_byte_ = 0x28;
-    } else {  // DIMMER_800
+    } else if (type_ == DimmerType::DIMMER_800) {
         max_native_brightness_ = 800;
+        command_byte_ = 0x35;
+    } else {  // DIMMER_2048
+        max_native_brightness_ = 2048;
         command_byte_ = 0x35;
     }
 }
@@ -53,7 +56,7 @@ bool I2CDimmerOutput::init() {
 
     std::cout << "[I2CDimmer]  Initialized on " << device_
               << " at address 0x" << std::hex << static_cast<int>(address_) << std::dec
-              << " (type: " << (type_ == DimmerType::DIMMER_200 ? "dimmer200" : "dimmer800")
+              << " (type: " << getType()
               << ", range: 0-" << max_native_brightness_ << ")\n";
 
     return true;
@@ -86,7 +89,12 @@ int I2CDimmerOutput::getCurrentBrightness() {
 }
 
 std::string I2CDimmerOutput::getType() const {
-    return (type_ == DimmerType::DIMMER_200) ? "dimmer200" : "dimmer800";
+    switch (type_) {
+        case DimmerType::DIMMER_200:  return "dimmer200";
+        case DimmerType::DIMMER_800:  return "dimmer800";
+        case DimmerType::DIMMER_2048: return "dimmer2048";
+    }
+    return "unknown";
 }
 
 // Static helper function to convert decimal to BCD format (16-bit)
@@ -134,7 +142,7 @@ bool I2CDimmerOutput::writeI2CBrightness(int native_value) {
         // Keeping binary encoding for now until FPGA firmware is clarified
         buffer[4] = static_cast<uint8_t>(native_value);
         buffer_len = 5;
-    } else {
+    } else if (type_ == DimmerType::DIMMER_800) {
         // dimmer800: 6 bytes total (header + command + 2-byte BCD value)
         // FPGA expects BCD encoding for register 0x35
         // Convert decimal to BCD (e.g., 456 -> 0x04 0x56)
@@ -142,6 +150,11 @@ bool I2CDimmerOutput::writeI2CBrightness(int native_value) {
         decimalToBCD16(native_value, msb, lsb);
         buffer[4] = msb;  // BCD: thousands and hundreds
         buffer[5] = lsb;  // BCD: tens and ones
+        buffer_len = 6;
+    } else {
+        // dimmer2048: 6 bytes total (header + command + 2-byte binary big-endian)
+        buffer[4] = static_cast<uint8_t>((native_value >> 8) & 0xFF);
+        buffer[5] = static_cast<uint8_t>(native_value & 0xFF);
         buffer_len = 6;
     }
 
@@ -157,7 +170,7 @@ bool I2CDimmerOutput::writeI2CBrightness(int native_value) {
 }
 
 int I2CDimmerOutput::scaleToNative(int percent) const {
-    // Scale 0-100% to native range (0-200 or 0-800)
+    // Scale 0-100% to native range (0-200, 0-800, or 0-2048)
     return static_cast<int>((percent / 100.0) * max_native_brightness_);
 }
 
@@ -171,6 +184,8 @@ std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device
         dimmer_type = I2CDimmerOutput::DimmerType::DIMMER_200;
     } else if (type == "dimmer800") {
         dimmer_type = I2CDimmerOutput::DimmerType::DIMMER_800;
+    } else if (type == "dimmer2048") {
+        dimmer_type = I2CDimmerOutput::DimmerType::DIMMER_2048;
     } else {
         std::cerr << "[I2CDimmer]  Unknown dimmer type: " << type << "\n";
         return nullptr;

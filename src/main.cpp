@@ -84,7 +84,7 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
         return als_dimmer::createDDCUtilOutput(config.output.display_number);
     }
 #endif
-    else if (config.output.type == "dimmer200" || config.output.type == "dimmer800") {
+    else if (config.output.type == "dimmer200" || config.output.type == "dimmer800" || config.output.type == "dimmer2048") {
         // Parse I2C address from hex string (e.g., "0x1D" -> 0x1D)
         uint8_t address = static_cast<uint8_t>(std::stoul(config.output.address, nullptr, 16));
         return als_dimmer::createI2CDimmerOutput(config.output.device, address, config.output.type);
