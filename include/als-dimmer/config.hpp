@@ -100,6 +100,7 @@ struct ControlConfig {
     std::string state_file = "/var/lib/als-dimmer/state.json";
     int auto_resume_timeout_sec = 60;
     std::string log_level = "info";  // trace | debug | info | warn | error
+    bool minimal_i2c = false;  // Skip sensor reads in MANUAL modes to reduce I2C traffic
 };
 
 struct NotificationConfig {

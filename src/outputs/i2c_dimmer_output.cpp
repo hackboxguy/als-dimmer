@@ -63,6 +63,11 @@ bool I2CDimmerOutput::setBrightness(int brightness) {
     // Clamp to valid range
     brightness = std::max(0, std::min(100, brightness));
 
+    // Skip redundant I2C writes if value hasn't changed
+    if (brightness == current_brightness_) {
+        return true;
+    }
+
     // Scale to native brightness
     int native_value = scaleToNative(brightness);
 

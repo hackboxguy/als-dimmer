@@ -487,8 +487,11 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Always read sensor (for status reporting in all modes)
-        current_lux = sensor->readLux();
+        // Read sensor: skip in MANUAL modes when minimal_i2c is enabled
+        if (!config.control.minimal_i2c ||
+            state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
+            current_lux = sensor->readLux();
+        }
 
         // Control logic based on operating mode
         if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {

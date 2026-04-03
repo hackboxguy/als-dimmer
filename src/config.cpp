@@ -162,6 +162,9 @@ Config Config::loadFromFile(const std::string& filename) {
         if (control_json.contains("log_level")) {
             config.control.log_level = control_json["log_level"].get<std::string>();
         }
+        if (control_json.contains("minimal_i2c")) {
+            config.control.minimal_i2c = control_json["minimal_i2c"].get<bool>();
+        }
     }
 
     // Parse zones
