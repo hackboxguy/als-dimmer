@@ -29,7 +29,8 @@
     "fallback_brightness": 50,
     "state_file": "/tmp/als-dimmer-state.json",
     "auto_resume_timeout_sec": 60,
-    "log_level": "info"
+    "log_level": "info",
+    "minimal_i2c": false
   },
 
   "zones": [
