@@ -86,6 +86,29 @@ Config Config::loadFromFile(const std::string& filename) {
         config.output.internal_range = output_json["internal_range"].get<std::vector<int>>();
     }
 
+    // boe_pwm-specific fields (all optional with sane defaults)
+    if (output_json.contains("pwm_chip")) {
+        config.output.pwm_chip = output_json["pwm_chip"].get<std::string>();
+    }
+    if (output_json.contains("pwm_channel")) {
+        config.output.pwm_channel = output_json["pwm_channel"].get<int>();
+    }
+    if (output_json.contains("pwm_gpio")) {
+        config.output.pwm_gpio = output_json["pwm_gpio"].get<int>();
+    }
+    if (output_json.contains("pwm_alt_func")) {
+        config.output.pwm_alt_func = output_json["pwm_alt_func"].get<std::string>();
+    }
+    if (output_json.contains("period_ns")) {
+        config.output.period_ns = output_json["period_ns"].get<int>();
+    }
+    if (output_json.contains("response_curve")) {
+        config.output.response_curve = output_json["response_curve"].get<std::string>();
+    }
+    if (output_json.contains("skip_chip_config")) {
+        config.output.skip_chip_config = output_json["skip_chip_config"].get<bool>();
+    }
+
     // Parse control configuration (with defaults)
     if (j.contains("control")) {
         auto& control_json = j["control"];
@@ -326,6 +349,25 @@ void Config::validate() const {
             if (output.address.empty()) {
                 throw ConfigError("output.address is required for " + output.type + " output type");
             }
+        }
+    } else if (output.type == "boe_pwm") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for boe_pwm output type (I2C bus for MPQ3367, e.g. /dev/i2c-22)");
+        }
+        if (output.address.empty()) {
+            throw ConfigError("output.address is required for boe_pwm output type (MPQ3367 I2C address, e.g. 0x38)");
+        }
+        if (output.period_ns < 1000) {
+            throw ConfigError("output.period_ns must be >= 1000 for boe_pwm output type");
+        }
+        if (output.pwm_chip.empty()) {
+            throw ConfigError("output.pwm_chip cannot be empty for boe_pwm output type");
+        }
+        if (output.pwm_channel < 0) {
+            throw ConfigError("output.pwm_channel must be >= 0 for boe_pwm output type");
+        }
+        if (output.pwm_alt_func.empty()) {
+            throw ConfigError("output.pwm_alt_func cannot be empty for boe_pwm output type");
         }
     } else if (output.type == "file") {
         if (output.file_path.empty()) {

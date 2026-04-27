@@ -25,15 +25,24 @@ struct SensorConfig {
 };
 
 struct OutputConfig {
-    std::string type;           // ddcutil | dimmer200 | dimmer800 | dimmer2048 | fpga_sysfs_dimmer | custom_i2c | can | file
-    std::string device;         // For I2C/ddcutil
+    std::string type;           // ddcutil | dimmer200 | dimmer800 | dimmer2048 | fpga_sysfs_dimmer | boe_pwm | custom_i2c | can | file
+    std::string device;         // For I2C/ddcutil (also: I2C bus for MPQ3367 in boe_pwm)
     int display_number = 0;     // For ddcutil
-    std::string address;        // For custom I2C, dimmer200, dimmer800
+    std::string address;        // For custom I2C, dimmer200, dimmer800 (also: MPQ3367 I2C addr in boe_pwm)
     std::string file_path;      // For file output and sysfs-based outputs
 
     // Range configuration - value_range[1] is max hardware value (e.g., {0, 800} for fpga_sysfs_dimmer)
     std::vector<int> value_range = {0, 100};      // Device's native range
     std::vector<int> internal_range = {0, 100};   // Internal range (always 0-100)
+
+    // boe_pwm-specific fields (BOE display backlight via MPQ3367 + Pi PWM)
+    std::string pwm_chip = "pwmchip0";
+    int pwm_channel = 0;
+    int pwm_gpio = 18;
+    std::string pwm_alt_func = "a5";
+    int period_ns = 500000;             // 2 kHz default
+    std::string response_curve;         // Optional CSV path (empty = direct duty mapping)
+    bool skip_chip_config = false;      // True if MPQ3367 is already initialized externally
 };
 
 struct StepSizes {

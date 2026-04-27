@@ -29,6 +29,7 @@ set(CORE_SOURCES
     src/outputs/file_output.cpp
     src/outputs/i2c_dimmer_output.cpp
     src/outputs/fpga_sysfs_output.cpp
+    src/outputs/boe_pwm_output.cpp
 )
 
 # Create executable

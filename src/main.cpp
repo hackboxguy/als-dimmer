@@ -46,6 +46,15 @@ std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device
                                                         uint8_t address,
                                                         const std::string& type);
 std::unique_ptr<OutputInterface> createFPGASysfsOutput(const std::string& sysfs_path, int max_value);
+std::unique_ptr<OutputInterface> createBoePwmOutput(const std::string& i2c_device,
+                                                     uint8_t i2c_address,
+                                                     const std::string& pwm_chip,
+                                                     int pwm_channel,
+                                                     int pwm_gpio,
+                                                     const std::string& pwm_alt_func,
+                                                     int period_ns,
+                                                     const std::string& response_curve_path,
+                                                     bool skip_chip_config);
 
 } // namespace als_dimmer
 
@@ -93,6 +102,20 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
         return als_dimmer::createFPGASysfsOutput(
             config.output.device,
             config.output.value_range[1]  // max hardware value
+        );
+    }
+    else if (config.output.type == "boe_pwm") {
+        uint8_t address = static_cast<uint8_t>(std::stoul(config.output.address, nullptr, 16));
+        return als_dimmer::createBoePwmOutput(
+            config.output.device,
+            address,
+            config.output.pwm_chip,
+            config.output.pwm_channel,
+            config.output.pwm_gpio,
+            config.output.pwm_alt_func,
+            config.output.period_ns,
+            config.output.response_curve,
+            config.output.skip_chip_config
         );
     }
     LOG_ERROR("factory", "Unsupported output type: " << config.output.type);
