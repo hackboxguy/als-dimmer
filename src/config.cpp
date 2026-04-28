@@ -295,6 +295,20 @@ Config Config::loadFromFile(const std::string& filename) {
         if (b2n_json.contains("sweep_table")) {
             config.brightness_to_nits.sweep_table = b2n_json["sweep_table"].get<std::string>();
         }
+
+        // Resolve relative paths against the config file's directory so the
+        // shipped configs work regardless of CMAKE_INSTALL_PREFIX. Absolute
+        // paths are passed through unchanged. Note: only sweep_table gets this
+        // treatment; existing path fields keep their CWD-relative semantics
+        // for backward compatibility.
+        if (!config.brightness_to_nits.sweep_table.empty() &&
+            config.brightness_to_nits.sweep_table[0] != '/') {
+            size_t slash = filename.find_last_of('/');
+            if (slash != std::string::npos) {
+                config.brightness_to_nits.sweep_table =
+                    filename.substr(0, slash + 1) + config.brightness_to_nits.sweep_table;
+            }
+        }
     }
 
     // Parse calibration configuration (optional)

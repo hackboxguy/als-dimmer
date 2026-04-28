@@ -1,5 +1,6 @@
 {
   "_comment": "BOE display backlight via MPS MPQ3367 + Pi PWM. Requires dtoverlay=pwm,pin=18,func=2 in /boot/firmware/config.txt. Set output.response_curve to e.g. /home/pi/pwm-poc/backlight_sweep_2000hz_1percent_step.csv to switch from direct duty mapping to linear-in-nits.",
+  "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific BOE unit; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/boe_pwm_2khz_reference.csv. Path is resolved relative to this config file's directory.",
 
   "sensor": {
     "type": "opti4001",
@@ -73,5 +74,10 @@
     "enabled": false,
     "sample_duration_sec": 60,
     "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/boe_pwm_2khz_reference.csv"
   }
 }

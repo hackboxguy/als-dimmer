@@ -94,6 +94,15 @@ file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/configs/*.json")
 install(FILES ${CONFIG_FILES}
     DESTINATION ${CMAKE_INSTALL_PREFIX}/etc/als-dimmer)
 
+# Install calibration sweep tables to PREFIX/etc/als-dimmer/calibrations/.
+# Configs reference these via relative paths (resolved against the config file's
+# directory) so the install prefix is irrelevant to whether they're found.
+file(GLOB CALIBRATION_FILES "${CMAKE_CURRENT_SOURCE_DIR}/calibrations/*.csv")
+if(CALIBRATION_FILES)
+    install(FILES ${CALIBRATION_FILES}
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/etc/als-dimmer/calibrations)
+endif()
+
 # Create symlink for default config
 install(CODE "
     file(CREATE_LINK
