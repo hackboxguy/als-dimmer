@@ -36,6 +36,10 @@ ParsedCommand parseCommand(const std::string& json_str) {
         cmd.type = CommandType::ADJUST_BRIGHTNESS;
     } else if (command_str == "get_config") {
         cmd.type = CommandType::GET_CONFIG;
+    } else if (command_str == "get_absolute_brightness") {
+        cmd.type = CommandType::GET_ABSOLUTE_BRIGHTNESS;
+    } else if (command_str == "set_absolute_brightness") {
+        cmd.type = CommandType::SET_ABSOLUTE_BRIGHTNESS;
     } else {
         cmd.type = CommandType::UNKNOWN;
     }
@@ -69,13 +73,21 @@ std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
                                    const std::string& current_zone,
-                                   const std::string& sensor_status) {
+                                   const std::string& sensor_status,
+                                   bool calibrated,
+                                   double nits) {
     json data;
     data["mode"] = mode;  // Now accepts: "auto", "manual", or "manual_temporary"
     data["brightness"] = current_brightness;
     data["lux"] = current_lux;
     data["zone"] = current_zone;
     data["sensor_status"] = sensor_status;  // "available" or "unavailable"
+    data["calibrated"] = calibrated;
+    if (calibrated) {
+        data["nits"] = nits;
+    } else {
+        data["nits"] = nullptr;
+    }
 
     return generateResponse(ResponseStatus::SUCCESS,
                           "Status retrieved successfully",
@@ -112,6 +124,10 @@ std::string commandTypeToString(CommandType type) {
             return "adjust_brightness";
         case CommandType::GET_CONFIG:
             return "get_config";
+        case CommandType::GET_ABSOLUTE_BRIGHTNESS:
+            return "get_absolute_brightness";
+        case CommandType::SET_ABSOLUTE_BRIGHTNESS:
+            return "set_absolute_brightness";
         case CommandType::UNKNOWN:
         default:
             return "unknown";

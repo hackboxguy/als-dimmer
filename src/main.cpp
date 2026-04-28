@@ -10,6 +10,7 @@
 #include "als-dimmer/notifier.hpp"
 #include "als-dimmer/sensors/can_als_sensor.hpp"
 #include "als-dimmer/sensors/null_sensor.hpp"
+#include "als-dimmer/brightness_to_nits_lut.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <memory>
@@ -155,7 +156,9 @@ std::string processCommand(const std::string& command,
                           bool& manual_override_occurred,
                           std::string& manual_override_type,
                           als_dimmer::Notifier& notifier,
-                          bool sensor_available) {
+                          bool sensor_available,
+                          const als_dimmer::BrightnessToNitsLut& b2n_lut,
+                          const std::string& output_type) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -191,12 +194,22 @@ std::string processCommand(const std::string& command,
                             break;
                     }
 
+                    bool calibrated = b2n_lut.is_loaded();
+                    double nits = 0.0;
+                    if (calibrated) {
+                        bool clamped_unused = false;
+                        nits = b2n_lut.pctToNits(static_cast<double>(current_brightness),
+                                                 clamped_unused);
+                    }
+
                     return generateStatusResponse(
                         mode_str,
                         current_brightness,
                         current_lux,
                         zone_name,
-                        sensor_available ? "available" : "unavailable"
+                        sensor_available ? "available" : "unavailable",
+                        calibrated,
+                        nits
                     );
                 }
 
@@ -311,7 +324,79 @@ std::string processCommand(const std::string& command,
                     data["mode"] = als_dimmer::StateManager::modeToString(state_mgr.getMode());
                     data["manual_brightness"] = state_mgr.getManualBrightness();
                     data["last_auto_brightness"] = state_mgr.getLastAutoBrightness();
+                    data["output_type"] = output_type;
+                    data["calibrated"] = b2n_lut.is_loaded();
+                    if (b2n_lut.is_loaded()) {
+                        data["calibration_min_nits"] = b2n_lut.min_nits();
+                        data["calibration_max_nits"] = b2n_lut.max_nits();
+                        if (!b2n_lut.label().empty()) {
+                            data["calibration_label"] = b2n_lut.label();
+                        }
+                    }
                     return generateConfigResponse(data);
+                }
+
+                case CommandType::GET_ABSOLUTE_BRIGHTNESS: {
+                    json data;
+                    data["brightness_pct"] = current_brightness;
+                    data["calibrated"] = b2n_lut.is_loaded();
+                    if (b2n_lut.is_loaded()) {
+                        bool clamped_unused = false;
+                        double nits = b2n_lut.pctToNits(static_cast<double>(current_brightness),
+                                                       clamped_unused);
+                        data["nits"] = nits;
+                    } else {
+                        data["nits"] = nullptr;
+                    }
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                          "Absolute brightness retrieved",
+                                          data);
+                }
+
+                case CommandType::SET_ABSOLUTE_BRIGHTNESS: {
+                    if (!b2n_lut.is_loaded()) {
+                        return generateErrorResponse(
+                            "Calibration table not loaded; cannot map nits to brightness",
+                            "CALIBRATION_NOT_LOADED");
+                    }
+                    if (!parsed_cmd.params.contains("nits")) {
+                        return generateErrorResponse("Missing 'nits' parameter", "INVALID_PARAMS");
+                    }
+                    double target_nits = parsed_cmd.params["nits"].get<double>();
+                    if (target_nits < 0.0) {
+                        return generateErrorResponse("nits must be >= 0", "INVALID_PARAMS");
+                    }
+
+                    bool clamped = false;
+                    double pct = b2n_lut.nitsToPct(target_nits, clamped);
+                    int brightness = std::max(0, std::min(100, static_cast<int>(pct + 0.5)));
+                    bool actual_clamped_unused = false;
+                    double actual_nits = b2n_lut.pctToNits(static_cast<double>(brightness),
+                                                          actual_clamped_unused);
+
+                    state_mgr.setManualBrightness(brightness);
+                    manual_override_occurred = true;
+                    manual_override_type = "set_absolute_brightness";
+
+                    if (state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
+                        state_mgr.setMode(als_dimmer::OperatingMode::MANUAL_TEMPORARY);
+                        manual_temp_start = std::chrono::steady_clock::now();
+                        notifier.emitModeChanged("manual_temporary");
+                    } else if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
+                        manual_temp_start = std::chrono::steady_clock::now();
+                    }
+                    notifier.emitBrightnessChanged(brightness);
+                    state_mgr.save();
+
+                    json data;
+                    data["brightness_pct"] = brightness;
+                    data["target_nits"] = target_nits;
+                    data["actual_nits"] = actual_nits;
+                    data["clamped"] = clamped;
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                          clamped ? "Absolute brightness set (clamped to LUT range)"
+                                                  : "Absolute brightness set successfully",
+                                          data);
                 }
 
                 case CommandType::UNKNOWN:
@@ -436,6 +521,26 @@ int main(int argc, char* argv[]) {
     }
     LOG_INFO("main", "Output initialized: " << output->getType());
 
+    // Load brightness->nits calibration table (optional). Daemon runs identically
+    // when this is absent or fails to load - just without absolute-brightness API.
+    als_dimmer::BrightnessToNitsLut b2n_lut;
+    if (config.brightness_to_nits.enabled && !config.brightness_to_nits.sweep_table.empty()) {
+        if (b2n_lut.loadFromFile(config.brightness_to_nits.sweep_table)) {
+            // Warn (not fail) if the sweep was taken on a different output type.
+            const std::string& tag = b2n_lut.output_type_tag();
+            if (!tag.empty() && tag != output->getType()) {
+                LOG_WARN("main", "Calibration table output_type='" << tag
+                         << "' does not match current output.type='" << output->getType()
+                         << "' - LUT may be inaccurate. Re-run the sweep.");
+            }
+        } else {
+            LOG_WARN("main", "Calibration enabled but LUT failed to load; "
+                     "absolute-brightness API will report uncalibrated.");
+        }
+    } else {
+        LOG_INFO("main", "brightness_to_nits calibration disabled or not configured");
+    }
+
     // Initialize control interface (TCP and/or Unix sockets)
     als_dimmer::ControlInterface control(config.control);
     if (!control.start()) {
@@ -506,7 +611,8 @@ int main(int argc, char* argv[]) {
                                                   output->getCurrentBrightness(), manual_temp_start,
                                                   zone_mapper.get(),
                                                   manual_override_occurred, manual_override_type,
-                                                  notifier, sensor_available);
+                                                  notifier, sensor_available,
+                                                  b2n_lut, output->getType());
             control.sendResponseTo(queued.client_fd, response);
             if (queued.close_after_response && queued.client_fd >= 0) {
                 close(queued.client_fd);

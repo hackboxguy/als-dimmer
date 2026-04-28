@@ -124,6 +124,16 @@ struct CalibrationConfig {
     bool auto_adjust_zones = true;
 };
 
+struct BrightnessToNitsConfig {
+    bool enabled = false;
+    std::string sweep_table;  // Path to CSV produced by tools/als-dimmer-sweep.py
+    // Reserved for future thermal compensation:
+    //   bool thermal_compensation_enabled = false;
+    //   std::string cold_sweep_table;
+    //   std::string hot_sweep_table;
+    //   int warmup_minutes = 30;
+};
+
 struct Config {
     SensorConfig sensor;
     OutputConfig output;
@@ -131,6 +141,7 @@ struct Config {
     std::vector<Zone> zones;
     NotificationConfig notification;
     CalibrationConfig calibration;
+    BrightnessToNitsConfig brightness_to_nits;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);

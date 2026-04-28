@@ -285,6 +285,18 @@ Config Config::loadFromFile(const std::string& filename) {
         }
     }
 
+    // Parse brightness_to_nits configuration (optional - daemon runs identically
+    // when this block is absent, just without absolute-brightness API support).
+    if (j.contains("brightness_to_nits")) {
+        auto& b2n_json = j["brightness_to_nits"];
+        if (b2n_json.contains("enabled")) {
+            config.brightness_to_nits.enabled = b2n_json["enabled"].get<bool>();
+        }
+        if (b2n_json.contains("sweep_table")) {
+            config.brightness_to_nits.sweep_table = b2n_json["sweep_table"].get<std::string>();
+        }
+    }
+
     // Parse calibration configuration (optional)
     if (j.contains("calibration")) {
         auto& calib_json = j["calibration"];

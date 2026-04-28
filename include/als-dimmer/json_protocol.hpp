@@ -22,6 +22,8 @@ enum class CommandType {
     SET_BRIGHTNESS,
     ADJUST_BRIGHTNESS,
     GET_CONFIG,
+    GET_ABSOLUTE_BRIGHTNESS,
+    SET_ABSOLUTE_BRIGHTNESS,
     UNKNOWN
 };
 
@@ -52,11 +54,15 @@ std::string generateResponse(ResponseStatus status,
 
 // Generate status response (for GET_STATUS command)
 // sensor_status: "available" or "unavailable" - lets clients grey out the AUTO toggle.
+// calibrated:    true if a brightness->nits LUT is loaded; when false, `nits`
+//                is omitted from the JSON ("nits": null) and the value is ignored.
 std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
                                    const std::string& current_zone,
-                                   const std::string& sensor_status = "available");
+                                   const std::string& sensor_status = "available",
+                                   bool calibrated = false,
+                                   double nits = 0.0);
 
 // Generate config response (for GET_CONFIG command)
 std::string generateConfigResponse(const json& config_data);
