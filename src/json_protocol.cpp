@@ -68,12 +68,14 @@ std::string generateResponse(ResponseStatus status,
 std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
-                                   const std::string& current_zone) {
+                                   const std::string& current_zone,
+                                   const std::string& sensor_status) {
     json data;
     data["mode"] = mode;  // Now accepts: "auto", "manual", or "manual_temporary"
     data["brightness"] = current_brightness;
     data["lux"] = current_lux;
     data["zone"] = current_zone;
+    data["sensor_status"] = sensor_status;  // "available" or "unavailable"
 
     return generateResponse(ResponseStatus::SUCCESS,
                           "Status retrieved successfully",

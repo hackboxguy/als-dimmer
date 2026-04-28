@@ -104,6 +104,7 @@ struct ControlConfig {
     // Control settings
     int update_interval_ms = 500;
     int sensor_error_timeout_sec = 300;
+    int sensor_failure_timeout_sec = 30;  // Demote to MANUAL after this many seconds of unhealthy sensor reads
     int fallback_brightness = 50;
     float hysteresis_percent = 0.0f;  // Zone boundary hysteresis (0 = disabled, 5-15 typical)
     std::string state_file = "/var/lib/als-dimmer/state.json";

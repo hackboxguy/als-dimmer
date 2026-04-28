@@ -170,6 +170,9 @@ Config Config::loadFromFile(const std::string& filename) {
         if (control_json.contains("sensor_error_timeout_sec")) {
             config.control.sensor_error_timeout_sec = control_json["sensor_error_timeout_sec"].get<int>();
         }
+        if (control_json.contains("sensor_failure_timeout_sec")) {
+            config.control.sensor_failure_timeout_sec = control_json["sensor_failure_timeout_sec"].get<int>();
+        }
         if (control_json.contains("fallback_brightness")) {
             config.control.fallback_brightness = control_json["fallback_brightness"].get<int>();
         }

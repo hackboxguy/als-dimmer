@@ -9,6 +9,7 @@
 #include "als-dimmer/json_protocol.hpp"
 #include "als-dimmer/notifier.hpp"
 #include "als-dimmer/sensors/can_als_sensor.hpp"
+#include "als-dimmer/sensors/null_sensor.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <memory>
@@ -153,7 +154,8 @@ std::string processCommand(const std::string& command,
                           als_dimmer::ZoneMapper* zone_mapper,
                           bool& manual_override_occurred,
                           std::string& manual_override_type,
-                          als_dimmer::Notifier& notifier) {
+                          als_dimmer::Notifier& notifier,
+                          bool sensor_available) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -193,7 +195,8 @@ std::string processCommand(const std::string& command,
                         mode_str,
                         current_brightness,
                         current_lux,
-                        zone_name
+                        zone_name,
+                        sensor_available ? "available" : "unavailable"
                     );
                 }
 
@@ -210,6 +213,11 @@ std::string processCommand(const std::string& command,
                     }
                     if (mode_str != "auto" && mode_str != "manual") {
                         return generateErrorResponse("Mode must be 'auto' or 'manual'", "INVALID_PARAMS");
+                    }
+                    if (mode_str == "auto" && !sensor_available) {
+                        return generateErrorResponse(
+                            "Cannot switch to AUTO mode: ALS sensor unavailable",
+                            "SENSOR_UNAVAILABLE");
                     }
 
                     // When switching to MANUAL mode, preserve current brightness
@@ -401,13 +409,24 @@ int main(int argc, char* argv[]) {
     als_dimmer::StateManager state_mgr(config.control.state_file);
     state_mgr.load();
 
-    // Create sensor
+    // Create sensor. If init fails (no hardware, wrong bus, etc.), fall back to
+    // a NullSensor and force MANUAL mode so the daemon stays usable as a
+    // slider-controlled brightness service.
+    bool sensor_available = false;
     auto sensor = createSensor(config);
-    if (!sensor || !sensor->init()) {
-        LOG_ERROR("main", "Failed to initialize sensor");
-        return 1;
+    if (sensor && sensor->init()) {
+        sensor_available = true;
+        LOG_INFO("main", "Sensor initialized: " << sensor->getType());
+    } else {
+        LOG_WARN("main", "Sensor init failed; running in MANUAL-only mode (slider control)");
+        sensor = std::make_unique<als_dimmer::NullSensor>();
+        sensor->init();  // no-op, but keeps interface contract clean
+        // Force MANUAL mode and ensure manual_brightness is sane.
+        state_mgr.setMode(als_dimmer::OperatingMode::MANUAL);
+        if (state_mgr.getManualBrightness() <= 0) {
+            state_mgr.setManualBrightness(config.control.fallback_brightness);
+        }
     }
-    LOG_INFO("main", "Sensor initialized: " << sensor->getType());
 
     // Create output
     auto output = createOutput(config);
@@ -464,6 +483,7 @@ int main(int argc, char* argv[]) {
 
     auto loop_start = std::chrono::steady_clock::now();
     auto manual_temp_start = std::chrono::steady_clock::now();
+    auto last_sensor_healthy_time = std::chrono::steady_clock::now();
     float current_lux = 0.0f;
     bool should_exit = false;
 
@@ -486,7 +506,7 @@ int main(int argc, char* argv[]) {
                                                   output->getCurrentBrightness(), manual_temp_start,
                                                   zone_mapper.get(),
                                                   manual_override_occurred, manual_override_type,
-                                                  notifier);
+                                                  notifier, sensor_available);
             control.sendResponseTo(queued.client_fd, response);
             if (queued.close_after_response && queued.client_fd >= 0) {
                 close(queued.client_fd);
@@ -498,8 +518,9 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Check for auto-resume from MANUAL_TEMPORARY
-        if (state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
+        // Check for auto-resume from MANUAL_TEMPORARY (skip when sensor is unavailable)
+        if (sensor_available &&
+            state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL_TEMPORARY) {
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - manual_temp_start).count();
 
@@ -510,10 +531,43 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Read sensor: skip in MANUAL modes when minimal_i2c is enabled
-        if (!config.control.minimal_i2c ||
-            state_mgr.getMode() == als_dimmer::OperatingMode::AUTO) {
+        // Read sensor: skip when sensor isn't available, or in MANUAL modes
+        // when minimal_i2c is enabled. Otherwise read and feed the watchdog.
+        if (sensor_available &&
+            (!config.control.minimal_i2c ||
+             state_mgr.getMode() == als_dimmer::OperatingMode::AUTO)) {
             current_lux = sensor->readLux();
+
+            // Sensor watchdog: if the sensor stays unhealthy long enough,
+            // demote to NullSensor + MANUAL so the user keeps control.
+            if (sensor->isHealthy()) {
+                last_sensor_healthy_time = std::chrono::steady_clock::now();
+            } else {
+                auto unhealthy_for = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - last_sensor_healthy_time).count();
+                if (unhealthy_for >= config.control.sensor_failure_timeout_sec) {
+                    LOG_WARN("main", "Sensor unhealthy for " << unhealthy_for
+                             << "s; demoting to NullSensor and forcing MANUAL mode");
+                    sensor = std::make_unique<als_dimmer::NullSensor>();
+                    sensor->init();
+                    sensor_available = false;
+                    current_lux = -1.0f;
+                    if (state_mgr.getMode() != als_dimmer::OperatingMode::MANUAL) {
+                        if (state_mgr.getManualBrightness() <= 0) {
+                            state_mgr.setManualBrightness(config.control.fallback_brightness);
+                        }
+                        state_mgr.setMode(als_dimmer::OperatingMode::MANUAL);
+                        notifier.emitModeChanged("manual");
+                    }
+                    state_mgr.save();
+                }
+            }
+        } else if (!sensor_available) {
+            current_lux = -1.0f;
+        } else {
+            // Sensor available but read skipped (minimal_i2c in MANUAL); keep
+            // the watchdog timer fresh so it doesn't fire on the next AUTO read.
+            last_sensor_healthy_time = std::chrono::steady_clock::now();
         }
 
         // Control logic based on operating mode

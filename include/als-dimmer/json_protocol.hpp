@@ -51,10 +51,12 @@ std::string generateResponse(ResponseStatus status,
                             const json& data = json::object());
 
 // Generate status response (for GET_STATUS command)
+// sensor_status: "available" or "unavailable" - lets clients grey out the AUTO toggle.
 std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
-                                   const std::string& current_zone);
+                                   const std::string& current_zone,
+                                   const std::string& sensor_status = "available");
 
 // Generate config response (for GET_CONFIG command)
 std::string generateConfigResponse(const json& config_data);
