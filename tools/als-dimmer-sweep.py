@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""
+als-dimmer-sweep.py - drive the daemon through brightness 100..0% and record
+                      the displayed luminance at each step into a CSV.
+
+The CSV produced here is fed back to the daemon via:
+    "brightness_to_nits": {"enabled": true, "sweep_table": "..."}
+Once loaded, get_absolute_brightness / set_absolute_brightness become useful.
+
+Why not poke the output device directly? The daemon already abstracts away
+boe_pwm / dimmer800 / dimmer2048 / fpga_sysfs / ddcutil etc. By driving
+through the daemon's set_brightness command, the same sweep script works
+for every output type.
+
+Workflow:
+  1. Place a full-white patch on the area the colorimeter is measuring.
+  2. Make sure spotread (Argyll-CMS) finds the colorimeter and is calibrated.
+  3. Make sure als-dimmer is running with a working output.
+  4. Run this script. Saved current mode/brightness are restored at exit.
+
+Examples:
+  # Default: TCP localhost:9000, descending 100..0, 3s settle, no temp.
+  ./als-dimmer-sweep.py --output sweep_warm.csv --label warm
+
+  # Unix socket, custom step size, with F1KM backlight NTC temp.
+  ./als-dimmer-sweep.py \\
+      --socket /tmp/als-dimmer.sock \\
+      --step 5 --output sweep_warm_5pct.csv --label warm \\
+      --temp-cmd 'i2ctransfer -y 1 w2@0x66 0x10 0x02 r2@0x66 | python3 -c "import sys,struct; r=sys.stdin.read().split(); print(struct.unpack(\\">h\\", bytes(int(x,16) for x in r))[0]/10.0)"'
+
+  # sysfs hwmon temperature source (NTC exposed via lm-sensors / a kernel driver).
+  ./als-dimmer-sweep.py --output sweep_hot.csv --label hot \\
+      --temp-cmd 'awk "{print \\$1/1000.0}" /sys/class/hwmon/hwmon3/temp1_input'
+
+CSV format (matches what the daemon's BrightnessToNitsLut expects):
+
+  # label=warm
+  # output_type=boe_pwm
+  # timestamp=2026-04-28T12:34:56+00:00
+  # temp_source_cmd=...
+  brightness_pct,nits,status,backlight_temp_c
+  100,1119.80,OK,42.5
+  99,1110.40,OK,42.7
+  ...
+  0,0.05,OK,
+"""
+
+import argparse
+import csv
+import datetime
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+
+# --- daemon JSON-line protocol -----------------------------------------------
+
+class DaemonClient:
+    def __init__(self, socket_path=None, host="127.0.0.1", port=9000, timeout=5.0):
+        if socket_path:
+            self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self._sock.settimeout(timeout)
+            self._sock.connect(socket_path)
+        else:
+            self._sock = socket.create_connection((host, port), timeout=timeout)
+
+    def call(self, command, **params):
+        msg = {"command": command}
+        if params:
+            msg["params"] = params
+        self._sock.sendall((json.dumps(msg) + "\n").encode())
+        # Read until we get one full JSON object back. Daemon sends a single
+        # response per command; usually fits in one recv but loop just in case.
+        buf = b""
+        while True:
+            chunk = self._sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+            try:
+                return json.loads(buf.decode())
+            except json.JSONDecodeError:
+                continue
+        raise RuntimeError("daemon closed connection without sending a response")
+
+    def close(self):
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+
+# --- spotread driver ---------------------------------------------------------
+
+_YXY_RE = re.compile(r"Result is XYZ:.*Yxy:\s*([\d.]+)")
+
+
+def parse_y_from_spotread(text):
+    """Pull the Y (nits) value from spotread's "Result is XYZ: ..., Yxy: Y x y" line."""
+    m = _YXY_RE.search(text)
+    return float(m.group(1)) if m else None
+
+
+def measure_nits(max_retries, retry_sleep_s):
+    """Run spotread once per attempt; return (nits_or_None, retries_used)."""
+    retries = 0
+    for attempt in range(max_retries + 1):
+        try:
+            out = subprocess.check_output(
+                ["spotread", "-x", "-O"],
+                stderr=subprocess.STDOUT,
+                timeout=15,
+            ).decode(errors="replace")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                FileNotFoundError) as e:
+            out = str(e)
+
+        nits = parse_y_from_spotread(out)
+        if nits is not None:
+            return nits, retries
+        retries += 1
+        if attempt < max_retries:
+            print(f"    retry {retries}/{max_retries} (spotread parse failed)",
+                  file=sys.stderr)
+            time.sleep(retry_sleep_s)
+    return None, retries
+
+
+def read_temp(temp_cmd):
+    """Run --temp-cmd, parse first float from stdout. Returns None on any error."""
+    if not temp_cmd:
+        return None
+    try:
+        out = subprocess.check_output(
+            ["sh", "-c", temp_cmd], stderr=subprocess.DEVNULL, timeout=5
+        ).decode(errors="replace").strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"-?\d+(\.\d+)?", out)
+    return float(m.group(0)) if m else None
+
+
+# --- main --------------------------------------------------------------------
+
+def build_step_list(start, end, step):
+    """Inclusive list from start to end with the given step (descending if start>end)."""
+    if start == end:
+        return [start]
+    if start > end:
+        steps = list(range(start, end - 1, -abs(step)))
+        if steps[-1] != end:
+            steps.append(end)
+    else:
+        steps = list(range(start, end + 1, abs(step)))
+        if steps[-1] != end:
+            steps.append(end)
+    return steps
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Run a brightness-to-nits sweep through als-dimmer and write a CSV.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__.split("Examples:", 1)[1] if "Examples:" in __doc__ else "",
+    )
+    # Connection
+    ap.add_argument("--socket", help="Unix socket path (overrides --host/--port)")
+    ap.add_argument("--host", default="127.0.0.1", help="TCP host (default: 127.0.0.1)")
+    ap.add_argument("--port", type=int, default=9000, help="TCP port (default: 9000)")
+
+    # Sweep shape
+    ap.add_argument("--start", type=int, default=100, help="Starting brightness %% (default: 100)")
+    ap.add_argument("--end",   type=int, default=0,   help="Ending brightness %% (default: 0)")
+    ap.add_argument("--step",  type=int, default=1,   help="Step size in %% (default: 1)")
+    ap.add_argument("--ascending", action="store_true",
+                    help="Sweep 0..100 instead of the default 100..0")
+
+    # Timing & retries
+    ap.add_argument("--settle-seconds", type=float, default=3.0,
+                    help="Seconds to wait after each set_brightness before measuring (default: 3.0)")
+    ap.add_argument("--max-retries", type=int, default=5,
+                    help="spotread parse retries per row (default: 5)")
+    ap.add_argument("--retry-sleep", type=float, default=1.0,
+                    help="Seconds between spotread retries (default: 1.0)")
+    ap.add_argument("--max-consecutive-failures", type=int, default=10,
+                    help="Abort if this many rows in a row fail (default: 10)")
+
+    # Side data
+    ap.add_argument("--temp-cmd",
+                    help="Shell command that prints backlight temperature in degC. "
+                         "Stdout is parsed for the first float. Empty/failed -> column blank.")
+    ap.add_argument("--label", default="",
+                    help="Free-form label written into CSV header (e.g. cold/warm/hot)")
+
+    # Output
+    ap.add_argument("--output", required=True, help="Path to write the CSV")
+
+    # Behavior toggles
+    ap.add_argument("--no-restore", action="store_true",
+                    help="Don't restore the original mode/brightness on exit (debug only)")
+
+    args = ap.parse_args()
+
+    # Validate sweep bounds
+    if not (0 <= args.start <= 100) or not (0 <= args.end <= 100):
+        print("error: --start and --end must be in [0, 100]", file=sys.stderr)
+        return 2
+    if args.step <= 0:
+        print("error: --step must be > 0", file=sys.stderr)
+        return 2
+
+    # Apply --ascending flag
+    if args.ascending:
+        steps = build_step_list(min(args.start, args.end), max(args.start, args.end), args.step)
+    else:
+        # Default: high to low
+        s_hi, s_lo = max(args.start, args.end), min(args.start, args.end)
+        steps = build_step_list(s_hi, s_lo, args.step)
+
+    # Connect to daemon, capture original state, force MANUAL
+    print(f"connecting to daemon ({'socket=' + args.socket if args.socket else f'tcp={args.host}:{args.port}'})...",
+          file=sys.stderr)
+    try:
+        client = DaemonClient(args.socket, args.host, args.port)
+    except (OSError, socket.timeout) as e:
+        print(f"error: cannot connect to daemon: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        st = client.call("get_status")
+        if st.get("status") != "success":
+            print(f"error: get_status failed: {st}", file=sys.stderr)
+            return 1
+        original_mode = st["data"]["mode"]
+        original_brightness = st["data"]["brightness"]
+        sensor_status = st["data"].get("sensor_status", "available")
+
+        cfg = client.call("get_config")
+        output_type = cfg["data"].get("output_type", "unknown") \
+            if cfg.get("status") == "success" else "unknown"
+    except (KeyError, json.JSONDecodeError) as e:
+        print(f"error: unexpected daemon response: {e}", file=sys.stderr)
+        return 1
+
+    print(f"daemon: output_type={output_type} sensor={sensor_status} "
+          f"original mode={original_mode} brightness={original_brightness}%",
+          file=sys.stderr)
+
+    # Force MANUAL so the daemon doesn't override our brightness writes from AUTO.
+    # If sensor is unavailable the daemon is already in MANUAL.
+    if original_mode != "manual":
+        r = client.call("set_mode", mode="manual")
+        if r.get("status") != "success":
+            print(f"error: set_mode manual failed: {r.get('message')}", file=sys.stderr)
+            client.close()
+            return 1
+
+    # Restore on Ctrl-C / kill / normal exit. We always at least try to write
+    # whatever rows we collected, so the sweep is never wasted.
+    rows_collected = []
+    aborted_reason = None
+
+    def _restore_and_write():
+        if not args.no_restore:
+            try:
+                # Restore brightness while still in MANUAL so AUTO mode doesn't
+                # flip to MANUAL_TEMPORARY on the set_brightness call.
+                if original_mode == "manual":
+                    client.call("set_brightness", brightness=original_brightness)
+                else:
+                    # AUTO (or MANUAL_TEMPORARY) doesn't persist - flip back to
+                    # AUTO and let its zone mapping recompute brightness.
+                    client.call("set_mode", mode="auto")
+            except (OSError, socket.timeout):
+                pass
+        try:
+            client.close()
+        except OSError:
+            pass
+        if rows_collected or aborted_reason:
+            _write_csv(args, output_type, steps, rows_collected, aborted_reason)
+
+    def _signal_handler(signum, _frame):
+        nonlocal aborted_reason
+        aborted_reason = f"signal {signum}"
+        print(f"\ncaught signal {signum}, restoring and writing partial CSV...",
+              file=sys.stderr)
+        _restore_and_write()
+        sys.exit(130 if signum == signal.SIGINT else 143)
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
+    # ---- run the sweep -----------------------------------------------------
+    print(f"sweeping {len(steps)} steps -> {args.output}", file=sys.stderr)
+    print("--------", file=sys.stderr)
+
+    consecutive_failures = 0
+    for idx, pct in enumerate(steps, start=1):
+        r = client.call("set_brightness", brightness=int(pct))
+        if r.get("status") != "success":
+            print(f"  [{idx}/{len(steps)}] set_brightness {pct}%% failed: {r.get('message')}",
+                  file=sys.stderr)
+            rows_collected.append((pct, None, "FAIL", None, 0))
+            consecutive_failures += 1
+            if consecutive_failures >= args.max_consecutive_failures:
+                aborted_reason = f"{consecutive_failures} consecutive failures"
+                print(f"abort: {aborted_reason}", file=sys.stderr)
+                break
+            continue
+
+        time.sleep(args.settle_seconds)
+        nits, retries = measure_nits(args.max_retries, args.retry_sleep)
+        temp = read_temp(args.temp_cmd)
+        status = "OK" if nits is not None else "FAIL"
+
+        if nits is None:
+            consecutive_failures += 1
+        else:
+            consecutive_failures = 0
+
+        rows_collected.append((pct, nits, status, temp, retries))
+        nits_disp = f"{nits:>9.4f}" if nits is not None else "       NA"
+        temp_disp = f" temp={temp:.1f}C" if temp is not None else ""
+        print(f"  [{idx:>3}/{len(steps)}] {pct:>3}% -> nits={nits_disp} "
+              f"({status}, retries={retries}){temp_disp}",
+              file=sys.stderr)
+
+        if consecutive_failures >= args.max_consecutive_failures:
+            aborted_reason = f"{consecutive_failures} consecutive measurement failures"
+            print(f"abort: {aborted_reason}", file=sys.stderr)
+            break
+
+    # Normal completion
+    _restore_and_write()
+    print("--------", file=sys.stderr)
+    print(f"sweep complete -> {args.output}", file=sys.stderr)
+    return 0
+
+
+def _write_csv(args, output_type, planned_steps, rows, aborted_reason):
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
+    with open(args.output, "w", newline="") as f:
+        w = csv.writer(f)
+        f.write("# als-dimmer brightness-to-nits sweep\n")
+        if args.label:
+            f.write(f"# label={args.label}\n")
+        f.write(f"# output_type={output_type}\n")
+        f.write(f"# timestamp={datetime.datetime.now().astimezone().isoformat()}\n")
+        f.write(f"# step_pct={args.step} settle_seconds={args.settle_seconds} "
+                f"max_retries={args.max_retries}\n")
+        f.write(f"# planned_steps={len(planned_steps)} actual_rows={len(rows)}\n")
+        if args.temp_cmd:
+            # Don't write multi-line / very long commands; truncate for readability.
+            cmd_one = " ".join(args.temp_cmd.split())
+            if len(cmd_one) > 200:
+                cmd_one = cmd_one[:197] + "..."
+            f.write(f"# temp_source_cmd={cmd_one}\n")
+        if aborted_reason:
+            f.write(f"# aborted={aborted_reason}\n")
+
+        # Linearity summary (skip if too few OK rows)
+        ok_rows = [r for r in rows if r[2] == "OK" and r[1] is not None]
+        if len(ok_rows) >= 2:
+            ok_sorted = sorted(ok_rows, key=lambda r: r[0])
+            min_n, max_n = ok_sorted[0][1], ok_sorted[-1][1]
+            f.write(f"# nits_min={min_n:.3f} nits_max={max_n:.3f} ok_rows={len(ok_rows)}\n")
+
+        w.writerow(["brightness_pct", "nits", "status", "backlight_temp_c"])
+        for pct, nits, status, temp, _retries in rows:
+            nits_str = f"{nits:.4f}" if nits is not None else ""
+            temp_str = f"{temp:.2f}" if temp is not None else ""
+            w.writerow([pct, nits_str, status, temp_str])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
