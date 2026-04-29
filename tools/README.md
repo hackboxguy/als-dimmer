@@ -1,4 +1,46 @@
-# ALS-Dimmer CSV Visualization Tool
+# ALS-Dimmer Tools
+
+This directory contains supporting tools for the ALS-Dimmer daemon.
+
+## `als-dimmer-sweep.py` — brightness-to-nits calibration sweep
+
+Drives the running daemon through brightness 100..0% (or any range/step) and
+records the displayed luminance at each step using an Argyll-CMS colorimeter
+(`spotread`). The output CSV is in the format the daemon's `BrightnessToNitsLut`
+consumes — point `brightness_to_nits.sweep_table` at it and restart the daemon to
+enable accurate per-panel `--absolute-brightness` and `--max-brightness` queries.
+
+The tool is **output-agnostic** — it speaks to the daemon's JSON protocol over
+TCP or Unix socket, never the output device directly, so the same script works
+for `boe_pwm`, `dimmer800`, `dimmer2048`, `fpga_sysfs_dimmer`, `ddcutil`, etc.
+
+```bash
+# Default warm sweep (100..0% in 1% steps, 3s settle)
+./als-dimmer-sweep.py --output ./calibrations/my_panel_warm.csv --label warm
+
+# Custom step + F1KM-MCU backlight NTC temperature recording
+./als-dimmer-sweep.py --step 5 --label hot \
+    --output ./calibrations/my_panel_hot.csv \
+    --temp-cmd 'i2ctransfer -y 1 w2@0x66 0x10 0x02 r2@0x66 | python3 -c "import sys,struct; r=sys.stdin.read().split(); print(struct.unpack(\">h\", bytes(int(x,16) for x in r))[0]/10.0)"'
+
+# See all flags + temp-source examples
+./als-dimmer-sweep.py --help
+```
+
+The script saves the daemon's original mode and brightness, switches to MANUAL
+for the sweep duration, and restores on exit (or on Ctrl-C, with a partial CSV
+written so an interrupted run is never wasted). Pure stdlib Python — no pip
+dependencies.
+
+## `als-dimmer-client` — daemon control utility
+
+Built and installed alongside the daemon. See `als-dimmer-client --help` for the
+full surface; the absolute-brightness flags are documented in the project
+[README](../README.md#absolute-brightness-nits).
+
+---
+
+## ALS-Dimmer CSV Visualization Tool
 
 ## Overview
 

@@ -360,7 +360,10 @@ All communication uses structured JSON messages for reliability and extensibilit
     "mode": "auto",                    // or "manual", "manual_temporary"
     "brightness": 75,
     "lux": 450.5,
-    "zone": "indoor"
+    "zone": "indoor",
+    "sensor_status": "available",      // or "unavailable" - see NullSensor fallback
+    "calibrated": true,                // brightness->nits LUT loaded?
+    "nits": 749.2                      // null when calibrated=false
   }
 }
 ```
@@ -383,7 +386,12 @@ All communication uses structured JSON messages for reliability and extensibilit
   "data": {
     "mode": "auto",
     "manual_brightness": 75,
-    "last_auto_brightness": 52
+    "last_auto_brightness": 52,
+    "output_type": "boe_pwm",          // current output device type
+    "calibrated": true,                // brightness->nits LUT loaded?
+    "calibration_min_nits": 0.05,      // present only when calibrated=true
+    "calibration_max_nits": 1119.8,    // present only when calibrated=true
+    "calibration_label": "warm"        // present only when calibrated=true and label set
   }
 }
 ```
@@ -442,6 +450,104 @@ All communication uses structured JSON messages for reliability and extensibilit
 
 **Valid delta range:** -100 to +100
 
+**6. GET_ABSOLUTE_BRIGHTNESS** - Get current brightness in nits
+```json
+// Request:
+{"version": "1.0", "command": "get_absolute_brightness"}
+
+// Response (calibrated):
+{
+  "version": "1.0",
+  "status": "success",
+  "message": "Absolute brightness retrieved",
+  "data": {
+    "brightness_pct": 65,
+    "calibrated": true,
+    "nits": 749.2
+  }
+}
+
+// Response (uncalibrated):
+{
+  "version": "1.0",
+  "status": "success",
+  "message": "Absolute brightness retrieved",
+  "data": {"brightness_pct": 65, "calibrated": false, "nits": null}
+}
+```
+
+Always returns `status: success`. Clients probe `calibrated` to decide whether
+the `nits` value is meaningful.
+
+**7. SET_ABSOLUTE_BRIGHTNESS** - Set brightness via a target in nits
+```json
+// Request:
+{"version": "1.0", "command": "set_absolute_brightness", "params": {"nits": 750}}
+
+// Response (within range):
+{
+  "version": "1.0",
+  "status": "success",
+  "message": "Absolute brightness set successfully",
+  "data": {
+    "brightness_pct": 65,              // % the daemon ended up at
+    "target_nits": 750.0,              // what the caller asked for
+    "actual_nits": 749.2,              // what the LUT predicts at brightness_pct
+    "clamped": false                   // true if target was outside LUT range
+  }
+}
+
+// Response (out of range, clamped):
+{
+  "data": {"brightness_pct": 100, "target_nits": 5000, "actual_nits": 1119.8, "clamped": true}
+  // message: "Absolute brightness set (clamped to LUT range)"
+}
+
+// Error (no LUT loaded):
+{
+  "version": "1.0",
+  "status": "error",
+  "message": "Calibration table not loaded; cannot map nits to brightness",
+  "data": {"error_code": "CALIBRATION_NOT_LOADED"}
+}
+```
+
+Drives the same MANUAL_TEMPORARY logic as `set_brightness` when called from
+AUTO mode.
+
+**8. GET_CALIBRATION_INFO** - Diagnose the loaded brightness->nits LUT
+```json
+// Request:
+{"version": "1.0", "command": "get_calibration_info"}
+
+// Response (calibrated):
+{
+  "data": {
+    "calibrated": true,
+    "min_nits": 0.05,
+    "max_nits": 1119.8,
+    "label": "reference_unit",         // free-form, written into CSV header
+    "output_type": "boe_pwm",          // CSV header tag - daemon warns at load on mismatch
+    "row_count": 101
+  }
+}
+
+// Response (uncalibrated):
+{
+  "data": {"calibrated": false, "min_nits": null, "max_nits": null,
+           "label": "", "output_type": "", "row_count": 0}
+}
+```
+
+Lighter than `get_config` for clients that just need the LUT range/metadata.
+
+> **Terminology note:** the `calibration` config block (`calibration.enabled`,
+> `calibration.sample_duration_sec`, `calibration.auto_adjust_zones`) drives
+> automatic *zone* adjustment from sample data and is unrelated to the
+> `brightness_to_nits` block, which loads a static `% -> nits` lookup table for
+> the absolute-brightness API. Both can be enabled simultaneously without
+> interaction.
+
 ### Error Responses
 
 ```json
@@ -459,6 +565,8 @@ All communication uses structured JSON messages for reliability and extensibilit
 - `UNKNOWN_COMMAND` - Unrecognized command type
 - `INVALID_FORMAT` - Non-JSON command (protocol error)
 - `INTERNAL_ERROR` - Server-side error
+- `SENSOR_UNAVAILABLE` - `set_mode auto` requested but no working ALS sensor (see NullSensor fallback)
+- `CALIBRATION_NOT_LOADED` - `set_absolute_brightness` requested but no brightness->nits LUT is loaded
 
 ### Security Considerations
 

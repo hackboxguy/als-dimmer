@@ -145,6 +145,32 @@ The `als-dimmer-client` provides a convenient command-line interface for control
 ./als-dimmer-client --status --json
 ```
 
+##### Absolute brightness (nits)
+
+When a brightness-to-nits calibration table is loaded (see `brightness_to_nits` in
+the config and `tools/als-dimmer-sweep.py`), the daemon can also report and accept
+absolute luminance in nits:
+
+```bash
+# Discover the LUT range so a UI can size its slider
+./als-dimmer-client --max-brightness        # e.g. 1119.8
+./als-dimmer-client --min-brightness        # e.g. 0.05
+
+# Read the panel's current absolute luminance
+./als-dimmer-client --absolute-brightness   # e.g. 749.2
+
+# Set a target in nits (clamped to LUT range, returns the % the daemon used)
+./als-dimmer-client --absolute-brightness=750
+
+# Inspect the loaded LUT (label, output_type tag, row count)
+./als-dimmer-client --calibration-info
+```
+
+When no LUT is loaded, the numeric queries print `(uncalibrated)` to stderr and
+exit with code 6, so scripts can probe with `if als-dimmer-client --max-brightness`.
+`set_absolute_brightness` errors with `CALIBRATION_NOT_LOADED` to avoid fabricating
+a nits-to-% mapping.
+
 #### Using the JSON Protocol Directly
 
 The daemon supports both TCP and Unix domain sockets with a JSON-based protocol:
@@ -182,11 +208,14 @@ printf '{"version":"1.0","command":"get_status"}' | nc -w 1 -U /tmp/als-dimmer.s
 ```
 
 **Available Commands:**
-- `get_status` - Get system status (mode, brightness, lux, zone)
-- `get_config` - Get configuration (mode, manual_brightness, last_auto_brightness)
-- `set_mode` - Set operating mode (`"auto"` or `"manual"`)
+- `get_status` - Get system status (mode, brightness, lux, zone, sensor_status, calibrated, nits)
+- `get_config` - Get configuration (mode, manual_brightness, last_auto_brightness, output_type, calibration metadata)
+- `set_mode` - Set operating mode (`"auto"` or `"manual"`). Rejected with `SENSOR_UNAVAILABLE` when AUTO is requested but no sensor is reachable.
 - `set_brightness` - Set brightness (0-100, triggers MANUAL_TEMPORARY in AUTO mode)
 - `adjust_brightness` - Adjust brightness by delta value (-100 to +100)
+- `get_absolute_brightness` - Get current brightness in nits. Returns `{"nits": null, "calibrated": false}` when no LUT is loaded.
+- `set_absolute_brightness` - Set brightness via a target in nits (`{"nits": 750}`). Inverse-interpolates through the loaded LUT to a brightness %. Out-of-range targets are clamped with a `clamped: true` flag. Errors `CALIBRATION_NOT_LOADED` when no LUT is loaded.
+- `get_calibration_info` - Get LUT diagnostics: `min_nits`, `max_nits`, `label`, `output_type`, `row_count`. Returns `{"calibrated": false}` when uncalibrated.
 
 ## Operating Modes
 
@@ -202,12 +231,46 @@ The daemon supports three operating modes with seamless transitions:
 - MANUAL_TEMPORARY timeout expires → Automatically returns to AUTO mode
 - Status response exposes all three modes including the transitional `manual_temporary` state
 
+### Sensor unavailable → MANUAL fallback
+
+If the ALS sensor fails to initialize (no hardware wired, wrong I2C bus, etc.) or
+goes unhealthy at runtime for longer than `control.sensor_failure_timeout_sec`
+(default 30s), the daemon swaps in a `NullSensor` and forces MANUAL mode so the
+display stays controllable from the slider. `get_status` reports
+`"sensor_status": "unavailable"` in this state and `set_mode auto` is rejected
+with `SENSOR_UNAVAILABLE` until the daemon is restarted with a working sensor.
+
 ## Configuration
 
 See `configs/` directory for sample configurations:
 - `config_opti4001_ddcutil.json` - OPTI4001 sensor + DDC/CI monitor
+- `config_opti4001_boepwm.json` - OPTI4001 sensor + BOE display via MPS MPQ3367 + Pi PWM (with reference brightness-to-nits LUT)
+- `config_fpga_opti4001_dimmer2048.json` - FPGA-bridged OPTI4001 + FPGA dimmer (16-bit native)
 - `config_can_als_file.json` - CAN ALS sensor + file output (for testing)
 - `config_simulation.json` - File-based simulation for testing
+
+### Brightness-to-nits calibration
+
+Optional top-level `brightness_to_nits` block points the daemon at a sweep table
+that maps brightness % (0..100) to absolute luminance for the deployed
+output+panel combo:
+
+```json
+"brightness_to_nits": {
+  "enabled": true,
+  "sweep_table": "calibrations/boe_pwm_2khz_reference.csv"
+}
+```
+
+Relative `sweep_table` paths resolve against the config file's directory, so the
+shipped configs work regardless of `CMAKE_INSTALL_PREFIX`. The `calibrations/`
+directory is installed alongside `etc/als-dimmer/` by `cmake --install`.
+
+A reference LUT for BOE displays is shipped pre-enabled in
+`config_opti4001_boepwm.json`. It was swept on one specific unit so per-panel
+variation of 5–15% is normal; for accurate readings on your panel, run
+`tools/als-dimmer-sweep.py` (drives the daemon's `set_brightness` and a
+colorimeter through `spotread`) and replace the file.
 
 ## Troubleshooting
 
