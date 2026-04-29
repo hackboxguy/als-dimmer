@@ -4,6 +4,7 @@
  */
 
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <cstring>
 #include <cstdlib>
@@ -308,6 +309,22 @@ std::string sendCommand(int sock_fd, const std::string& json_request) {
     return std::string(buffer);
 }
 
+// Format a raw JSON-string nits value for human display: 1 decimal place.
+// Daemon emits doubles at full precision (good for --json and machine
+// consumers); the client rounds for readability. Falls back to the raw
+// string on parse failure.
+std::string formatNits(const std::string& raw) {
+    if (raw.empty() || raw == "null") return raw;
+    try {
+        double d = std::stod(raw);
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1) << d;
+        return oss.str();
+    } catch (const std::exception&) {
+        return raw;
+    }
+}
+
 // Print a "value or uncalibrated" message and return whether it was uncalibrated.
 // Used by --absolute-brightness, --max-brightness, --min-brightness.
 // When uncalibrated: prints "(uncalibrated)" to stderr, returns true so the
@@ -324,7 +341,7 @@ bool printNumericOrUncalibrated(const std::string& json_response,
         std::cerr << "(uncalibrated)\n";
         return true;
     }
-    std::cout << val << "\n";
+    std::cout << formatNits(val) << "\n";
     return false;
 }
 
@@ -364,7 +381,7 @@ bool printResponse(const std::string& json_response, const CommandConfig& cmd) {
                       << "  Mode: " << mode << "\n"
                       << "  Brightness: " << brightness << "%\n";
             if (calibrated == "true" && !nits.empty() && nits != "null") {
-                std::cout << "  Nits: " << nits << " (calibrated)\n";
+                std::cout << "  Nits: " << formatNits(nits) << " (calibrated)\n";
             } else {
                 std::cout << "  Nits: (uncalibrated)\n";
             }
@@ -412,8 +429,8 @@ bool printResponse(const std::string& json_response, const CommandConfig& cmd) {
             std::string actual_nits = extractJsonValue(json_response, "actual_nits");
             std::string target_nits = extractJsonValue(json_response, "target_nits");
             std::string clamped = extractJsonValue(json_response, "clamped");
-            std::cout << "Absolute brightness set to " << target_nits << " nits"
-                      << " -> " << brightness_pct << "% (actual: " << actual_nits << " nits)";
+            std::cout << "Absolute brightness set to " << formatNits(target_nits) << " nits"
+                      << " -> " << brightness_pct << "% (actual: " << formatNits(actual_nits) << " nits)";
             if (clamped == "true") {
                 std::cout << " (clamped to LUT range)";
             }
@@ -440,7 +457,8 @@ bool printResponse(const std::string& json_response, const CommandConfig& cmd) {
             std::string output_type = extractJsonValue(json_response, "output_type");
             std::string row_count = extractJsonValue(json_response, "row_count");
             std::cout << "Calibrated: yes\n"
-                      << "  Range: " << min_nits << " .. " << max_nits << " nits\n";
+                      << "  Range: " << formatNits(min_nits) << " .. "
+                      << formatNits(max_nits) << " nits\n";
             if (!label.empty()) {
                 std::cout << "  Label: " << label << "\n";
             }
