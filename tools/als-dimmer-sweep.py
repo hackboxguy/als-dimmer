@@ -174,16 +174,33 @@ _DEFAULT_PRE_CMD = (
     f'{_DEFAULT_LAUNCHER_CLIENT} '
     '--srv=127.0.0.1:8082 --command="pattern white" --timeoutsec=2'
 )
-# Cleanup: pattern black + clear metadata + stop the pattern-generator app
-# so qt-demo-launcher's home screen comes back where the user started.
+# Cleanup: pattern black on disp-tester (so the brief moment before stop-app
+# tears it down is dark, not white), then stop-app so qt-demo-launcher's home
+# screen comes back where the user started. (set-metadata-text was tried
+# initially but disp-tester reliably drops the connection on an empty arg
+# - and stop-app destroys all metadata state anyway, so it's redundant.)
 _DEFAULT_POST_CMD = (
     f'{_DEFAULT_LAUNCHER_CLIENT} '
     '--srv=127.0.0.1:8082 --command="pattern black" --timeoutsec=2 ; '
     f'{_DEFAULT_LAUNCHER_CLIENT} '
-    '--srv=127.0.0.1:8082 --command="set-metadata-text " --timeoutsec=2 ; '
-    f'{_DEFAULT_LAUNCHER_CLIENT} '
     '--srv=127.0.0.1:8081 --command="stop-app" --timeoutsec=2'
 )
+
+
+def validate_output_path(path):
+    """Verify the output CSV path is writable BEFORE the sweep starts so the
+    user doesn't spend 5+ minutes of measurement only to discover at the end
+    that the destination directory needs sudo. We open in append mode so we
+    don't truncate any existing file at this point."""
+    try:
+        with open(path, "a"):
+            pass
+    except OSError as e:
+        print(f"error: cannot write --output {path}: {e}", file=sys.stderr)
+        print(f"hint: pick a path under your home or /tmp, e.g. "
+              f"--output ~/sweeps/your-name.csv", file=sys.stderr)
+        return False
+    return True
 
 
 def apply_platform_defaults(args):
@@ -342,6 +359,11 @@ def main():
     args = ap.parse_args()
     apply_platform_defaults(args)
 
+    # Catch unwritable --output paths up-front so the user doesn't waste a
+    # 5-minute sweep on a destination that turns out to need sudo.
+    if not validate_output_path(args.output):
+        return 1
+
     # Validate sweep bounds
     if not (0 <= args.start <= 100) or not (0 <= args.end <= 100):
         print("error: --start and --end must be in [0, 100]", file=sys.stderr)
@@ -421,7 +443,7 @@ def main():
         # Restore screen content (also runs on Ctrl-C / SIGTERM via _signal_handler).
         run_post_cmd(args.post_cmd)
         if rows_collected or aborted_reason:
-            _write_csv(args, output_type, steps, rows_collected, aborted_reason)
+            _safe_write_csv(args, output_type, steps, rows_collected, aborted_reason)
 
     def _signal_handler(signum, _frame):
         nonlocal aborted_reason
@@ -503,9 +525,35 @@ def main():
     return 0
 
 
-def _write_csv(args, output_type, planned_steps, rows, aborted_reason):
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
-    with open(args.output, "w", newline="") as f:
+def _safe_write_csv(args, output_type, planned_steps, rows, aborted_reason):
+    """Write the CSV at args.output. If that fails (permission denied, disk
+    full, path removed mid-run, etc.) fall back to a timestamped path under
+    /tmp so the data isn't silently lost. The pre-flight validate_output_path
+    check should normally catch the common case, but this is a safety net."""
+    try:
+        _write_csv(args, output_type, planned_steps, rows, aborted_reason)
+        return
+    except OSError as e:
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback = f"/tmp/als-dimmer-sweep-{ts}.csv"
+        print(f"warning: writing {args.output} failed ({e}); "
+              f"saving to {fallback} instead", file=sys.stderr)
+        try:
+            _write_csv(args, output_type, planned_steps, rows, aborted_reason,
+                       out_path=fallback)
+            print(f"data saved to {fallback}", file=sys.stderr)
+        except OSError as e2:
+            print(f"error: fallback write also failed: {e2}", file=sys.stderr)
+            print(f"data lost - {len(rows)} rows could not be saved",
+                  file=sys.stderr)
+
+
+def _write_csv(args, output_type, planned_steps, rows, aborted_reason,
+               out_path=None):
+    if out_path is None:
+        out_path = args.output
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    with open(out_path, "w", newline="") as f:
         w = csv.writer(f)
         f.write("# als-dimmer brightness-to-nits sweep\n")
         if args.label:
