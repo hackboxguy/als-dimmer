@@ -238,6 +238,35 @@ def _shell_escape_sq(s):
     return s.replace("'", "'\\''")
 
 
+# disp-tester only accepts ONE TCP client at a time (NetworkInterface.cpp
+# rejects new connects while m_clientSocket >= 0) and notices the previous
+# client's close on a 100ms Qt poll timer. Back-to-back launcher-client
+# invocations get silently rejected (accept + immediate close, no error
+# returned). We add a small per-call gap to disp-tester to stay outside
+# that race window. The gap is only enforced if the previous disp-tester
+# call was very recent - per-step calls in the sweep loop have a 3s+
+# settle gap between them and never need to wait.
+_DISP_TESTER_GAP_SEC = 0.15  # >100ms timer interval, with margin
+_last_disp_tester_call = 0.0
+
+
+def _wait_disp_tester_gap():
+    """Block briefly if it's been less than _DISP_TESTER_GAP_SEC since the
+    last call to disp-tester, so the daemon has time to finish closing the
+    previous client socket before we open a new one."""
+    elapsed = time.monotonic() - _last_disp_tester_call
+    if elapsed < _DISP_TESTER_GAP_SEC:
+        time.sleep(_DISP_TESTER_GAP_SEC - elapsed)
+
+
+def _mark_disp_tester_call():
+    """Record the moment we just sent something to disp-tester. Also called
+    after run_pre_cmd() if the pre-cmd ended with a launcher-client call to
+    disp-tester (default flow does), so the first helper call waits."""
+    global _last_disp_tester_call
+    _last_disp_tester_call = time.monotonic()
+
+
 def set_overlay_text(message):
     """Push `message` to disp-tester's bottom-right metadata overlay via
     launcher-client. Uses disp-tester's `set-metadata-text` command (which
@@ -250,6 +279,7 @@ def set_overlay_text(message):
     starts in `autohide` mode."""
     if not message:
         return
+    _wait_disp_tester_gap()
     cmd = (f'{_DEFAULT_LAUNCHER_CLIENT} --srv=127.0.0.1:8082 '
            f'--command=\'set-metadata-text {_shell_escape_sq(message)}\' '
            f'--timeoutsec=1')
@@ -260,6 +290,7 @@ def set_overlay_text(message):
                        timeout=2)
     except (subprocess.TimeoutExpired, OSError):
         pass  # overlay update is best-effort - never block the sweep
+    _mark_disp_tester_call()
 
 
 def enable_overlay_visibility():
@@ -268,6 +299,7 @@ def enable_overlay_visibility():
     throughout the sweep. State is sticky inside disp-tester until the
     next set-metadata-status (or disp-tester restart). Call this once
     after disp-tester is up but before the first set_overlay_text."""
+    _wait_disp_tester_gap()
     cmd = (f'{_DEFAULT_LAUNCHER_CLIENT} --srv=127.0.0.1:8082 '
            f'--command="set-metadata-status enable" --timeoutsec=1')
     try:
@@ -277,6 +309,7 @@ def enable_overlay_visibility():
                        timeout=2)
     except (subprocess.TimeoutExpired, OSError):
         pass
+    _mark_disp_tester_call()
 
 
 def run_pre_cmd(cmd):
@@ -540,6 +573,13 @@ def main():
     if not run_pre_cmd(args.pre_cmd):
         _restore_and_write()
         return 2
+
+    # The default pre-cmd ends with a launcher-client `pattern white` to
+    # disp-tester. Treat that as a recent disp-tester call so the next
+    # helper waits past disp-tester's 100ms accept poll before opening a
+    # new connection. Custom pre-cmds that don't talk to disp-tester won't
+    # be hurt - the gap is at most _DISP_TESTER_GAP_SEC.
+    _mark_disp_tester_call()
 
     # Show an initial overlay message while warmup + first measurement are
     # in flight, so the operator sees something between pre-cmd completion
