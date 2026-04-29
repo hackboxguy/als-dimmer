@@ -159,15 +159,30 @@ def measure_nits(max_retries, retry_sleep_s):
 # pass --pre-cmd '' (empty string).
 
 _DEFAULT_LAUNCHER_CLIENT = os.path.expanduser("~/micropanel/usr/bin/launcher-client")
+
+# Two-step pre-cmd: ask qt-demo-launcher (port 8081) to start the
+# "pattern-generator" app (which spawns disp-tester listening on 8082),
+# wait briefly for it to come up, then ask disp-tester for full-white.
+# Chained with `;` rather than `&&` so an "app-already-running" response
+# from start-app doesn't prevent the pattern white call - the pattern
+# white step is the real success check, since pre-cmd's exit code comes
+# from the last command in the chain.
 _DEFAULT_PRE_CMD = (
+    f'{_DEFAULT_LAUNCHER_CLIENT} '
+    '--srv=127.0.0.1:8081 --command="start-app pattern-generator" --timeoutsec=2 ; '
+    'sleep 1 ; '
     f'{_DEFAULT_LAUNCHER_CLIENT} '
     '--srv=127.0.0.1:8082 --command="pattern white" --timeoutsec=2'
 )
+# Cleanup: pattern black + clear metadata + stop the pattern-generator app
+# so qt-demo-launcher's home screen comes back where the user started.
 _DEFAULT_POST_CMD = (
     f'{_DEFAULT_LAUNCHER_CLIENT} '
     '--srv=127.0.0.1:8082 --command="pattern black" --timeoutsec=2 ; '
     f'{_DEFAULT_LAUNCHER_CLIENT} '
-    '--srv=127.0.0.1:8082 --command="set-metadata-text " --timeoutsec=2'
+    '--srv=127.0.0.1:8082 --command="set-metadata-text " --timeoutsec=2 ; '
+    f'{_DEFAULT_LAUNCHER_CLIENT} '
+    '--srv=127.0.0.1:8081 --command="stop-app" --timeoutsec=2'
 )
 
 
@@ -297,14 +312,20 @@ def main():
                          "starts (e.g. switch the display to full-white via disp-tester). "
                          "Non-zero exit aborts the sweep - measuring against the wrong "
                          "screen content would produce a meaningless CSV. "
-                         "If omitted, defaults to launching micropanel's pattern white "
-                         "when ~/micropanel/usr/bin/launcher-client is installed; "
-                         "otherwise skipped. Pass --pre-cmd '' to disable.")
+                         "If omitted, defaults to a two-step micropanel sequence: "
+                         "start-app pattern-generator on qt-demo-launcher (8081), "
+                         "wait 1s for disp-tester to come up, then pattern white on "
+                         "disp-tester (8082). Default is used only when "
+                         "~/micropanel/usr/bin/launcher-client is installed; otherwise "
+                         "skipped. Pass --pre-cmd '' to disable.")
     ap.add_argument("--post-cmd", default=None,
                     help="Shell command run after the sweep finishes OR on Ctrl-C/SIGTERM "
                          "(e.g. restore the original screen content). Failure here is a "
-                         "warning, not fatal - the CSV is already written. Same default-"
-                         "and-skip semantics as --pre-cmd. Pass --post-cmd '' to disable.")
+                         "warning, not fatal - the CSV is already written. If omitted, "
+                         "defaults to: pattern black + clear metadata on disp-tester, "
+                         "then stop-app on qt-demo-launcher (returns to home screen). "
+                         "Same detection-and-skip semantics as --pre-cmd. "
+                         "Pass --post-cmd '' to disable.")
     ap.add_argument("--warmup-seconds", type=float, default=0.0,
                     help="After --pre-cmd, set the start brightness explicitly and sleep "
                          "this many seconds before measuring step 1. Useful when the panel "
