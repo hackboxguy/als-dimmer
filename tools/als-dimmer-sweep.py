@@ -239,18 +239,20 @@ def _shell_escape_sq(s):
 
 
 def set_overlay_text(message):
-    """Push `message` to disp-tester's bottom-right text overlay via
-    launcher-client. Fire-and-forget with a short timeout so a slow or
-    sick disp-tester can't drag the sweep out of timing. Caller is
-    responsible for gating on whether the overlay is enabled (typically
-    `if args.progress_text:`)."""
+    """Push `message` to disp-tester's bottom-right metadata overlay via
+    launcher-client. Uses disp-tester's `set-metadata-text` command (which
+    takes everything after the first space as the message and converts
+    literal `\\n` into real newlines internally - see PatternController.cpp).
+    Fire-and-forget with a short timeout so a slow or sick disp-tester
+    can't drag the sweep out of timing. Caller is responsible for gating
+    (typically `if args.progress_text:`) and for having previously called
+    enable_overlay_visibility() at least once - by default the overlay
+    starts in `autohide` mode."""
     if not message:
         return
-    # disp-tester wraps the message in double quotes when parsing
-    # `text "..."`, so embedded `"` would confuse it. Strip them.
-    sanitized = message.replace('"', '')
     cmd = (f'{_DEFAULT_LAUNCHER_CLIENT} --srv=127.0.0.1:8082 '
-           f'--command=\'text "{_shell_escape_sq(sanitized)}"\' --timeoutsec=1')
+           f'--command=\'set-metadata-text {_shell_escape_sq(message)}\' '
+           f'--timeoutsec=1')
     try:
         subprocess.run(["sh", "-c", cmd],
                        stdout=subprocess.DEVNULL,
@@ -258,6 +260,23 @@ def set_overlay_text(message):
                        timeout=2)
     except (subprocess.TimeoutExpired, OSError):
         pass  # overlay update is best-effort - never block the sweep
+
+
+def enable_overlay_visibility():
+    """disp-tester's metadata visibility defaults to "autohide" - explicitly
+    set it to "enable" so per-step set-metadata-text calls stay visible
+    throughout the sweep. State is sticky inside disp-tester until the
+    next set-metadata-status (or disp-tester restart). Call this once
+    after disp-tester is up but before the first set_overlay_text."""
+    cmd = (f'{_DEFAULT_LAUNCHER_CLIENT} --srv=127.0.0.1:8082 '
+           f'--command="set-metadata-status enable" --timeoutsec=1')
+    try:
+        subprocess.run(["sh", "-c", cmd],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       timeout=2)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
 
 
 def run_pre_cmd(cmd):
@@ -524,8 +543,10 @@ def main():
 
     # Show an initial overlay message while warmup + first measurement are
     # in flight, so the operator sees something between pre-cmd completion
-    # and the first per-step update.
+    # and the first per-step update. Disp-tester defaults to `autohide`,
+    # so we explicitly enable visibility once before the first text call.
     if args.progress_text:
+        enable_overlay_visibility()
         set_overlay_text(_INITIAL_OVERLAY_TEXT)
 
     # Optional warmup: jump to the start brightness up-front and sleep, so
