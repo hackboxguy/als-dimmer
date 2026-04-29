@@ -13,7 +13,9 @@ through the daemon's set_brightness command, the same sweep script works
 for every output type.
 
 Workflow:
-  1. Place a full-white patch on the area the colorimeter is measuring.
+  1. Place a full-white patch on the area the colorimeter is measuring (use
+     --pre-cmd to switch the display to full-white automatically; otherwise
+     prepare it manually before running).
   2. Make sure spotread (Argyll-CMS) finds the colorimeter and is calibrated.
   3. Make sure als-dimmer is running with a working output.
   4. Run this script. Saved current mode/brightness are restored at exit.
@@ -31,6 +33,14 @@ Examples:
   # sysfs hwmon temperature source (NTC exposed via lm-sensors / a kernel driver).
   ./als-dimmer-sweep.py --output sweep_hot.csv --label hot \\
       --temp-cmd 'awk "{print \\$1/1000.0}" /sys/class/hwmon/hwmon3/temp1_input'
+
+  # Full BOE platform invocation: switch screen to full-white via disp-tester,
+  # warm up 5s at 100%, sweep, then restore black + IOC backlight NTC temp.
+  ./als-dimmer-sweep.py --output sweep_warm.csv --label warm --warmup-seconds 5 \\
+      --pre-cmd  'launcher-client --srv=127.0.0.1:8082 --command="pattern white" --timeoutsec=2' \\
+      --post-cmd 'launcher-client --srv=127.0.0.1:8082 --command="pattern black" --timeoutsec=2 ;
+                  launcher-client --srv=127.0.0.1:8082 --command="set-metadata-text " --timeoutsec=2' \\
+      --temp-cmd 'disptool --device=ioc --command=bltemp --autotestformat | sed -E "s/^.*Temperature[^:]*:\\s*([0-9.-]+).*/\\1/"'
 
 CSV format (matches what the daemon's BrightnessToNitsLut expects):
 
@@ -131,6 +141,42 @@ def measure_nits(max_retries, retry_sleep_s):
     return None, retries
 
 
+def run_pre_cmd(cmd):
+    """Run --pre-cmd. Returns True on success. Hard-fail (caller aborts) on
+    any non-zero exit, since measuring against wrong content produces a
+    meaningless CSV."""
+    if not cmd:
+        return True
+    print(f"running pre-cmd: {cmd}", file=sys.stderr)
+    try:
+        subprocess.run(["sh", "-c", cmd], check=True, timeout=30)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"error: --pre-cmd exited rc={e.returncode}; aborting sweep", file=sys.stderr)
+        return False
+    except subprocess.TimeoutExpired:
+        print("error: --pre-cmd timed out (30s); aborting sweep", file=sys.stderr)
+        return False
+    except FileNotFoundError as e:
+        print(f"error: --pre-cmd: {e}; aborting sweep", file=sys.stderr)
+        return False
+
+
+def run_post_cmd(cmd):
+    """Run --post-cmd. Failures are warned-but-not-fatal: the CSV is already
+    written by the time post-cmd runs, and forcing an error here would obscure
+    that data was successfully captured."""
+    if not cmd:
+        return
+    print(f"running post-cmd: {cmd}", file=sys.stderr)
+    try:
+        subprocess.run(["sh", "-c", cmd], timeout=30)
+    except subprocess.TimeoutExpired:
+        print("warning: --post-cmd timed out (30s)", file=sys.stderr)
+    except FileNotFoundError as e:
+        print(f"warning: --post-cmd: {e}", file=sys.stderr)
+
+
 def read_temp(temp_cmd):
     """Run --temp-cmd, parse first float from stdout. Returns None on any error."""
     if not temp_cmd:
@@ -196,6 +242,22 @@ def main():
                          "Stdout is parsed for the first float. Empty/failed -> column blank.")
     ap.add_argument("--label", default="",
                     help="Free-form label written into CSV header (e.g. cold/warm/hot)")
+
+    # Display content / warmup hooks
+    ap.add_argument("--pre-cmd",
+                    help="Shell command run after MANUAL is forced and before the sweep "
+                         "starts (e.g. switch the display to full-white via disp-tester). "
+                         "Non-zero exit aborts the sweep - measuring against the wrong "
+                         "screen content would produce a meaningless CSV.")
+    ap.add_argument("--post-cmd",
+                    help="Shell command run after the sweep finishes OR on Ctrl-C/SIGTERM "
+                         "(e.g. restore the original screen content). Failure here is a "
+                         "warning, not fatal - the CSV is already written.")
+    ap.add_argument("--warmup-seconds", type=float, default=0.0,
+                    help="After --pre-cmd, set the start brightness explicitly and sleep "
+                         "this many seconds before measuring step 1. Useful when the panel "
+                         "or colorimeter benefits from extra time to settle on the first "
+                         "row (default: 0 = skip)")
 
     # Output
     ap.add_argument("--output", required=True, help="Path to write the CSV")
@@ -282,6 +344,8 @@ def main():
             client.close()
         except OSError:
             pass
+        # Restore screen content (also runs on Ctrl-C / SIGTERM via _signal_handler).
+        run_post_cmd(args.post_cmd)
         if rows_collected or aborted_reason:
             _write_csv(args, output_type, steps, rows_collected, aborted_reason)
 
@@ -295,6 +359,28 @@ def main():
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
+
+    # ---- pre-sweep hooks ---------------------------------------------------
+    # Run --pre-cmd to set the display content (e.g., switch to full-white).
+    # The signal handlers above are already installed, so a Ctrl-C during a
+    # long-running pre-cmd still triggers _restore_and_write -> post-cmd.
+    if not run_pre_cmd(args.pre_cmd):
+        _restore_and_write()
+        return 2
+
+    # Optional warmup: jump to the start brightness up-front and sleep, so
+    # the panel and colorimeter have time to settle before step 1's reading
+    # (in addition to the per-step --settle-seconds).
+    if args.warmup_seconds > 0 and steps:
+        print(f"warmup: setting brightness {steps[0]}% and sleeping "
+              f"{args.warmup_seconds}s before measuring", file=sys.stderr)
+        try:
+            client.call("set_brightness", brightness=int(steps[0]))
+        except (OSError, socket.timeout) as e:
+            print(f"error: warmup set_brightness failed: {e}", file=sys.stderr)
+            _restore_and_write()
+            return 1
+        time.sleep(args.warmup_seconds)
 
     # ---- run the sweep -----------------------------------------------------
     print(f"sweeping {len(steps)} steps -> {args.output}", file=sys.stderr)
@@ -361,6 +447,13 @@ def _write_csv(args, output_type, planned_steps, rows, aborted_reason):
             if len(cmd_one) > 200:
                 cmd_one = cmd_one[:197] + "..."
             f.write(f"# temp_source_cmd={cmd_one}\n")
+        if args.pre_cmd:
+            cmd_one = " ".join(args.pre_cmd.split())
+            if len(cmd_one) > 200:
+                cmd_one = cmd_one[:197] + "..."
+            f.write(f"# pre_cmd={cmd_one}\n")
+        if args.warmup_seconds > 0:
+            f.write(f"# warmup_seconds={args.warmup_seconds}\n")
         if aborted_reason:
             f.write(f"# aborted={aborted_reason}\n")
 
