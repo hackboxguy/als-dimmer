@@ -40,6 +40,8 @@ ParsedCommand parseCommand(const std::string& json_str) {
         cmd.type = CommandType::GET_ABSOLUTE_BRIGHTNESS;
     } else if (command_str == "set_absolute_brightness") {
         cmd.type = CommandType::SET_ABSOLUTE_BRIGHTNESS;
+    } else if (command_str == "get_calibration_info") {
+        cmd.type = CommandType::GET_CALIBRATION_INFO;
     } else {
         cmd.type = CommandType::UNKNOWN;
     }
@@ -128,6 +130,8 @@ std::string commandTypeToString(CommandType type) {
             return "get_absolute_brightness";
         case CommandType::SET_ABSOLUTE_BRIGHTNESS:
             return "set_absolute_brightness";
+        case CommandType::GET_CALIBRATION_INFO:
+            return "get_calibration_info";
         case CommandType::UNKNOWN:
         default:
             return "unknown";

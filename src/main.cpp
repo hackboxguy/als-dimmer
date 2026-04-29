@@ -336,6 +336,26 @@ std::string processCommand(const std::string& command,
                     return generateConfigResponse(data);
                 }
 
+                case CommandType::GET_CALIBRATION_INFO: {
+                    json data;
+                    data["calibrated"] = b2n_lut.is_loaded();
+                    if (b2n_lut.is_loaded()) {
+                        data["min_nits"] = b2n_lut.min_nits();
+                        data["max_nits"] = b2n_lut.max_nits();
+                        data["label"] = b2n_lut.label();
+                        data["output_type"] = b2n_lut.output_type_tag();
+                        data["row_count"] = static_cast<int>(b2n_lut.row_count());
+                    } else {
+                        data["min_nits"] = nullptr;
+                        data["max_nits"] = nullptr;
+                        data["label"] = "";
+                        data["output_type"] = "";
+                        data["row_count"] = 0;
+                    }
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                          "Calibration info retrieved", data);
+                }
+
                 case CommandType::GET_ABSOLUTE_BRIGHTNESS: {
                     json data;
                     data["brightness_pct"] = current_brightness;

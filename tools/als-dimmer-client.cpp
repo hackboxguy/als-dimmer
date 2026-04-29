@@ -41,9 +41,23 @@ struct ConnectionConfig {
 };
 
 struct CommandConfig {
-    enum class Type { NONE, GET_STATUS, GET_BRIGHTNESS, SET_BRIGHTNESS, GET_MODE, SET_MODE, ADJUST_BRIGHTNESS };
+    enum class Type {
+        NONE,
+        GET_STATUS,
+        GET_BRIGHTNESS,
+        SET_BRIGHTNESS,
+        GET_MODE,
+        SET_MODE,
+        ADJUST_BRIGHTNESS,
+        GET_ABSOLUTE_BRIGHTNESS,
+        SET_ABSOLUTE_BRIGHTNESS,
+        GET_MAX_BRIGHTNESS,
+        GET_MIN_BRIGHTNESS,
+        GET_CALIBRATION_INFO
+    };
     Type type = Type::NONE;
     int value = 0;
+    double float_value = 0.0;  // for set_absolute_brightness (nits is a double)
     std::string mode;
     bool json_output = false;
 };
@@ -58,18 +72,26 @@ void printUsage(const char* program_name) {
               << "Output Options:\n"
               << "  --json               Output raw JSON response\n\n"
               << "Commands:\n"
-              << "  --status             Get daemon status (mode, brightness, lux, zone)\n"
-              << "  --brightness         Get current brightness (0-100)\n"
-              << "  --brightness=VALUE   Set brightness to VALUE (0-100)\n"
-              << "  --mode               Get current mode (auto/manual)\n"
-              << "  --mode=MODE          Set mode to MODE (auto or manual)\n"
-              << "  --adjust=DELTA       Adjust brightness by DELTA (-100 to +100)\n\n"
+              << "  --status                  Get daemon status (mode, brightness, lux, zone, sensor, nits)\n"
+              << "  --brightness              Get current brightness (0-100)\n"
+              << "  --brightness=VALUE        Set brightness to VALUE (0-100)\n"
+              << "  --mode                    Get current mode (auto/manual)\n"
+              << "  --mode=MODE               Set mode to MODE (auto or manual)\n"
+              << "  --adjust=DELTA            Adjust brightness by DELTA (-100 to +100)\n"
+              << "  --absolute-brightness     Get current brightness in nits (requires calibrated LUT)\n"
+              << "  --absolute-brightness=N   Set brightness to N nits (requires calibrated LUT)\n"
+              << "  --max-brightness          Print max nits supported by the loaded calibration LUT\n"
+              << "  --min-brightness          Print min nits supported by the loaded calibration LUT\n"
+              << "  --calibration-info        Show LUT status, range, label, output_type tag\n\n"
               << "Examples:\n"
               << "  " << program_name << " --status\n"
-              << "  " << program_name << " --brightness\n"
               << "  " << program_name << " --brightness=75\n"
               << "  " << program_name << " --mode=auto\n"
               << "  " << program_name << " --adjust=10\n"
+              << "  " << program_name << " --absolute-brightness        # current nits\n"
+              << "  " << program_name << " --absolute-brightness=750    # set 750 nits\n"
+              << "  " << program_name << " --max-brightness             # discover panel range\n"
+              << "  " << program_name << " --calibration-info\n"
               << "  " << program_name << " --ip=192.168.1.100 --port=9000 --status\n"
               << "  " << program_name << " --use-unix-socket --status\n"
               << "  " << program_name << " --status --json\n";
@@ -125,6 +147,14 @@ std::string buildJsonRequest(const std::string& command, const std::string& para
            "\",\"params\":{\"" + param_name + "\":\"" + param_value + "\"}}";
 }
 
+std::string buildJsonRequest(const std::string& command, const std::string& param_name, double param_value) {
+    std::ostringstream oss;
+    oss.precision(6);
+    oss << "{\"version\":\"1.0\",\"command\":\"" << command
+        << "\",\"params\":{\"" << param_name << "\":" << param_value << "}}";
+    return oss.str();
+}
+
 bool parseArguments(int argc, char* argv[], ConnectionConfig& conn, CommandConfig& cmd) {
     if (argc < 2) {
         return false;
@@ -170,6 +200,26 @@ bool parseArguments(int argc, char* argv[], ConnectionConfig& conn, CommandConfi
                 std::cerr << "Error: Adjust delta must be between -100 and +100\n";
                 return false;
             }
+        } else if (arg == "--absolute-brightness") {
+            cmd.type = CommandConfig::Type::GET_ABSOLUTE_BRIGHTNESS;
+        } else if (arg.rfind("--absolute-brightness=", 0) == 0) {
+            cmd.type = CommandConfig::Type::SET_ABSOLUTE_BRIGHTNESS;
+            try {
+                cmd.float_value = std::stod(parseArgValue(argv[i], "--absolute-brightness="));
+            } catch (const std::exception&) {
+                std::cerr << "Error: --absolute-brightness value must be a number\n";
+                return false;
+            }
+            if (cmd.float_value < 0.0) {
+                std::cerr << "Error: --absolute-brightness value must be >= 0\n";
+                return false;
+            }
+        } else if (arg == "--max-brightness") {
+            cmd.type = CommandConfig::Type::GET_MAX_BRIGHTNESS;
+        } else if (arg == "--min-brightness") {
+            cmd.type = CommandConfig::Type::GET_MIN_BRIGHTNESS;
+        } else if (arg == "--calibration-info") {
+            cmd.type = CommandConfig::Type::GET_CALIBRATION_INFO;
         } else if (arg == "--help" || arg == "-h") {
             return false;
         } else {
@@ -258,10 +308,34 @@ std::string sendCommand(int sock_fd, const std::string& json_request) {
     return std::string(buffer);
 }
 
-void printResponse(const std::string& json_response, const CommandConfig& cmd) {
+// Print a "value or uncalibrated" message and return whether it was uncalibrated.
+// Used by --absolute-brightness, --max-brightness, --min-brightness.
+// When uncalibrated: prints "(uncalibrated)" to stderr, returns true so the
+// caller can exit non-zero.
+bool printNumericOrUncalibrated(const std::string& json_response,
+                                const std::string& json_key) {
+    std::string calibrated = extractJsonValue(json_response, "calibrated");
+    if (calibrated != "true") {
+        std::cerr << "(uncalibrated)\n";
+        return true;
+    }
+    std::string val = extractJsonValue(json_response, json_key);
+    if (val.empty() || val == "null") {
+        std::cerr << "(uncalibrated)\n";
+        return true;
+    }
+    std::cout << val << "\n";
+    return false;
+}
+
+// Returns true if the command effectively succeeded; false if the daemon
+// returned status:error OR if a numeric query returned (uncalibrated). Used
+// by main() to choose the process exit code.
+bool printResponse(const std::string& json_response, const CommandConfig& cmd) {
     if (cmd.json_output) {
         std::cout << json_response << "\n";
-        return;
+        std::string status = extractJsonValue(json_response, "status");
+        return status != "error";
     }
 
     // Check status
@@ -273,7 +347,7 @@ void printResponse(const std::string& json_response, const CommandConfig& cmd) {
         if (!error_code.empty()) {
             std::cerr << "Error code: " << error_code << "\n";
         }
-        return;
+        return false;
     }
 
     // Format output based on command type
@@ -283,11 +357,22 @@ void printResponse(const std::string& json_response, const CommandConfig& cmd) {
             std::string brightness = extractJsonValue(json_response, "brightness");
             std::string lux = extractJsonValue(json_response, "lux");
             std::string zone = extractJsonValue(json_response, "zone");
+            std::string sensor_status = extractJsonValue(json_response, "sensor_status");
+            std::string calibrated = extractJsonValue(json_response, "calibrated");
+            std::string nits = extractJsonValue(json_response, "nits");
             std::cout << "Status:\n"
                       << "  Mode: " << mode << "\n"
-                      << "  Brightness: " << brightness << "%\n"
-                      << "  Lux: " << lux << "\n"
+                      << "  Brightness: " << brightness << "%\n";
+            if (calibrated == "true" && !nits.empty() && nits != "null") {
+                std::cout << "  Nits: " << nits << " (calibrated)\n";
+            } else {
+                std::cout << "  Nits: (uncalibrated)\n";
+            }
+            std::cout << "  Lux: " << lux << "\n"
                       << "  Zone: " << zone << "\n";
+            if (!sensor_status.empty()) {
+                std::cout << "  Sensor: " << sensor_status << "\n";
+            }
             break;
         }
         case CommandConfig::Type::GET_BRIGHTNESS: {
@@ -318,10 +403,60 @@ void printResponse(const std::string& json_response, const CommandConfig& cmd) {
                       << "New brightness: " << brightness << "%\n";
             break;
         }
+        case CommandConfig::Type::GET_ABSOLUTE_BRIGHTNESS: {
+            if (printNumericOrUncalibrated(json_response, "nits")) return false;
+            break;
+        }
+        case CommandConfig::Type::SET_ABSOLUTE_BRIGHTNESS: {
+            std::string brightness_pct = extractJsonValue(json_response, "brightness_pct");
+            std::string actual_nits = extractJsonValue(json_response, "actual_nits");
+            std::string target_nits = extractJsonValue(json_response, "target_nits");
+            std::string clamped = extractJsonValue(json_response, "clamped");
+            std::cout << "Absolute brightness set to " << target_nits << " nits"
+                      << " -> " << brightness_pct << "% (actual: " << actual_nits << " nits)";
+            if (clamped == "true") {
+                std::cout << " (clamped to LUT range)";
+            }
+            std::cout << "\n";
+            break;
+        }
+        case CommandConfig::Type::GET_MAX_BRIGHTNESS: {
+            if (printNumericOrUncalibrated(json_response, "max_nits")) return false;
+            break;
+        }
+        case CommandConfig::Type::GET_MIN_BRIGHTNESS: {
+            if (printNumericOrUncalibrated(json_response, "min_nits")) return false;
+            break;
+        }
+        case CommandConfig::Type::GET_CALIBRATION_INFO: {
+            std::string calibrated = extractJsonValue(json_response, "calibrated");
+            if (calibrated != "true") {
+                std::cout << "Calibrated: no\n";
+                break;
+            }
+            std::string min_nits = extractJsonValue(json_response, "min_nits");
+            std::string max_nits = extractJsonValue(json_response, "max_nits");
+            std::string label = extractJsonValue(json_response, "label");
+            std::string output_type = extractJsonValue(json_response, "output_type");
+            std::string row_count = extractJsonValue(json_response, "row_count");
+            std::cout << "Calibrated: yes\n"
+                      << "  Range: " << min_nits << " .. " << max_nits << " nits\n";
+            if (!label.empty()) {
+                std::cout << "  Label: " << label << "\n";
+            }
+            if (!output_type.empty()) {
+                std::cout << "  Output type: " << output_type << "\n";
+            }
+            if (!row_count.empty()) {
+                std::cout << "  Rows: " << row_count << "\n";
+            }
+            break;
+        }
         default:
             std::cout << json_response << "\n";
             break;
     }
+    return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -353,6 +488,17 @@ int main(int argc, char* argv[]) {
         case CommandConfig::Type::ADJUST_BRIGHTNESS:
             json_request = buildJsonRequest("adjust_brightness", "delta", cmd.value);
             break;
+        case CommandConfig::Type::GET_ABSOLUTE_BRIGHTNESS:
+            json_request = buildJsonRequest("get_absolute_brightness");
+            break;
+        case CommandConfig::Type::SET_ABSOLUTE_BRIGHTNESS:
+            json_request = buildJsonRequest("set_absolute_brightness", "nits", cmd.float_value);
+            break;
+        case CommandConfig::Type::GET_MAX_BRIGHTNESS:
+        case CommandConfig::Type::GET_MIN_BRIGHTNESS:
+        case CommandConfig::Type::GET_CALIBRATION_INFO:
+            json_request = buildJsonRequest("get_calibration_info");
+            break;
         default:
             std::cerr << "Error: Invalid command\n";
             return EXIT_INVALID_ARGS;
@@ -372,13 +518,11 @@ int main(int argc, char* argv[]) {
         return EXIT_RECEIVE_FAILED;
     }
 
-    // Parse and print response
+    // Parse and print response. printResponse returns false on either an
+    // explicit daemon-side error OR an "(uncalibrated)" numeric query, both
+    // of which should map to a non-zero exit so scripts can check $?.
     try {
-        printResponse(json_response, cmd);
-
-        // Check if command succeeded
-        std::string status = extractJsonValue(json_response, "status");
-        if (status == "error") {
+        if (!printResponse(json_response, cmd)) {
             return EXIT_COMMAND_FAILED;
         }
     } catch (const std::exception& e) {
