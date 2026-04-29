@@ -89,6 +89,12 @@ endif()
 # Install rules
 install(TARGETS als-dimmer als-dimmer-client DESTINATION bin)
 
+# Install als-dimmer-sweep helper. Renamed without .py extension to match
+# the als-dimmer / als-dimmer-client naming and to keep tab-completion tidy.
+install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/tools/als-dimmer-sweep.py
+    DESTINATION bin
+    RENAME als-dimmer-sweep)
+
 # Install all config files to PREFIX/etc/als-dimmer/
 file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/configs/*.json")
 install(FILES ${CONFIG_FILES}
