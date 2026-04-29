@@ -1,4 +1,6 @@
 {
+  "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific FPGA dimmer2048 + display unit; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/dimmer_2048.csv. Path is resolved relative to this config file's directory.",
+
   "sensor": {
     "type": "fpga_opti4001",
     "device": "/dev/i2c-1",
@@ -70,5 +72,10 @@
     "enabled": false,
     "sample_duration_sec": 60,
     "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/dimmer_2048.csv"
   }
 }
