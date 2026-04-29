@@ -34,13 +34,19 @@ Examples:
   ./als-dimmer-sweep.py --output sweep_hot.csv --label hot \\
       --temp-cmd 'awk "{print \\$1/1000.0}" /sys/class/hwmon/hwmon3/temp1_input'
 
-  # Full BOE platform invocation: switch screen to full-white via disp-tester,
-  # warm up 5s at 100%, sweep, then restore black + IOC backlight NTC temp.
+  # BOE Pi deployment: pre-cmd/post-cmd auto-default to micropanel's
+  # launcher-client when it's present at ~/micropanel/usr/bin/launcher-client,
+  # so the typical invocation is just:
   ./als-dimmer-sweep.py --output sweep_warm.csv --label warm --warmup-seconds 5 \\
-      --pre-cmd  'launcher-client --srv=127.0.0.1:8082 --command="pattern white" --timeoutsec=2' \\
-      --post-cmd 'launcher-client --srv=127.0.0.1:8082 --command="pattern black" --timeoutsec=2 ;
-                  launcher-client --srv=127.0.0.1:8082 --command="set-metadata-text " --timeoutsec=2' \\
       --temp-cmd 'disptool --device=ioc --command=bltemp --autotestformat | sed -E "s/^.*Temperature[^:]*:\\s*([0-9.-]+).*/\\1/"'
+
+  # Override the auto-default with a custom pattern source:
+  ./als-dimmer-sweep.py --output sweep_warm.csv --label warm \\
+      --pre-cmd  'my-pattern-tool set white' \\
+      --post-cmd 'my-pattern-tool set black'
+
+  # Explicitly disable the auto-default (e.g., screen is already full-white):
+  ./als-dimmer-sweep.py --output sweep_warm.csv --label warm --pre-cmd '' --post-cmd ''
 
 CSV format (matches what the daemon's BrightnessToNitsLut expects):
 
@@ -139,6 +145,47 @@ def measure_nits(max_retries, retry_sleep_s):
                   file=sys.stderr)
             time.sleep(retry_sleep_s)
     return None, retries
+
+
+# --- platform default pre/post commands -------------------------------------
+# The default --pre-cmd and --post-cmd wire the sweep into the micropanel
+# launcher-client display-pattern controller used on the BOE Pi deployment.
+# These defaults silently skip when launcher-client isn't installed at the
+# expected path, so the script still works on systems without micropanel
+# (the user is responsible for arranging a full-white screen patch some
+# other way, or passing --pre-cmd explicitly).
+#
+# To explicitly disable the defaults even when launcher-client IS installed,
+# pass --pre-cmd '' (empty string).
+
+_DEFAULT_LAUNCHER_CLIENT = os.path.expanduser("~/micropanel/usr/bin/launcher-client")
+_DEFAULT_PRE_CMD = (
+    f'{_DEFAULT_LAUNCHER_CLIENT} '
+    '--srv=127.0.0.1:8082 --command="pattern white" --timeoutsec=2'
+)
+_DEFAULT_POST_CMD = (
+    f'{_DEFAULT_LAUNCHER_CLIENT} '
+    '--srv=127.0.0.1:8082 --command="pattern black" --timeoutsec=2 ; '
+    f'{_DEFAULT_LAUNCHER_CLIENT} '
+    '--srv=127.0.0.1:8082 --command="set-metadata-text " --timeoutsec=2'
+)
+
+
+def apply_platform_defaults(args):
+    """If --pre-cmd / --post-cmd weren't supplied (None), fill in the
+    platform default when the referenced launcher-client binary is
+    executable. Otherwise leave as empty (skip). Explicit empty strings
+    from the command line are preserved so the user can opt out."""
+    launcher_present = os.access(_DEFAULT_LAUNCHER_CLIENT, os.X_OK)
+    for attr, default in (("pre_cmd", _DEFAULT_PRE_CMD),
+                          ("post_cmd", _DEFAULT_POST_CMD)):
+        if getattr(args, attr) is None:
+            if launcher_present:
+                setattr(args, attr, default)
+                print(f"using default --{attr.replace('_', '-')} "
+                      f"(launcher-client detected)", file=sys.stderr)
+            else:
+                setattr(args, attr, "")
 
 
 def run_pre_cmd(cmd):
@@ -243,16 +290,21 @@ def main():
     ap.add_argument("--label", default="",
                     help="Free-form label written into CSV header (e.g. cold/warm/hot)")
 
-    # Display content / warmup hooks
-    ap.add_argument("--pre-cmd",
+    # Display content / warmup hooks. None = use platform default (micropanel/
+    # launcher-client) if available, else skip. Empty string = explicitly skip.
+    ap.add_argument("--pre-cmd", default=None,
                     help="Shell command run after MANUAL is forced and before the sweep "
                          "starts (e.g. switch the display to full-white via disp-tester). "
                          "Non-zero exit aborts the sweep - measuring against the wrong "
-                         "screen content would produce a meaningless CSV.")
-    ap.add_argument("--post-cmd",
+                         "screen content would produce a meaningless CSV. "
+                         "If omitted, defaults to launching micropanel's pattern white "
+                         "when ~/micropanel/usr/bin/launcher-client is installed; "
+                         "otherwise skipped. Pass --pre-cmd '' to disable.")
+    ap.add_argument("--post-cmd", default=None,
                     help="Shell command run after the sweep finishes OR on Ctrl-C/SIGTERM "
                          "(e.g. restore the original screen content). Failure here is a "
-                         "warning, not fatal - the CSV is already written.")
+                         "warning, not fatal - the CSV is already written. Same default-"
+                         "and-skip semantics as --pre-cmd. Pass --post-cmd '' to disable.")
     ap.add_argument("--warmup-seconds", type=float, default=0.0,
                     help="After --pre-cmd, set the start brightness explicitly and sleep "
                          "this many seconds before measuring step 1. Useful when the panel "
@@ -267,6 +319,7 @@ def main():
                     help="Don't restore the original mode/brightness on exit (debug only)")
 
     args = ap.parse_args()
+    apply_platform_defaults(args)
 
     # Validate sweep bounds
     if not (0 <= args.start <= 100) or not (0 <= args.end <= 100):
