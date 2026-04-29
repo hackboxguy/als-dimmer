@@ -169,6 +169,13 @@ _DEFAULT_PROGRESS_TEMPLATE = (
 )
 _INITIAL_OVERLAY_TEXT = "Starting calibration sweep..."
 
+# Disp-tester's metadata font size defaults to 16px, which is hard to read
+# from across the room while a calibration is running. 32 is double that
+# - readable at a few meters and still fits multi-line content comfortably
+# without overflowing the bottom-right corner. Hard limits are 8..48 (per
+# PatternController.cpp's set-metadata-fontsize handler).
+_DEFAULT_PROGRESS_FONTSIZE = 32
+
 _DEFAULT_LAUNCHER_CLIENT = os.path.expanduser("~/micropanel/usr/bin/launcher-client")
 
 # Two-step pre-cmd: ask qt-demo-launcher (port 8081) to start the
@@ -290,6 +297,26 @@ def set_overlay_text(message):
                        timeout=2)
     except (subprocess.TimeoutExpired, OSError):
         pass  # overlay update is best-effort - never block the sweep
+    _mark_disp_tester_call()
+
+
+def set_overlay_fontsize(size):
+    """Push set-metadata-fontsize to disp-tester. Disp-tester accepts 8..48
+    (PatternController.cpp); out-of-range values are silently ignored. Like
+    the status setting, the size is sticky until disp-tester restarts. Call
+    this once at startup."""
+    if not (8 <= size <= 48):
+        return
+    _wait_disp_tester_gap()
+    cmd = (f'{_DEFAULT_LAUNCHER_CLIENT} --srv=127.0.0.1:8082 '
+           f'--command="set-metadata-fontsize {size}" --timeoutsec=1')
+    try:
+        subprocess.run(["sh", "-c", cmd],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       timeout=2)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
     _mark_disp_tester_call()
 
 
@@ -448,6 +475,12 @@ def main():
                          "Progress / Step / Brightness' template when launcher-client is "
                          "installed; otherwise the overlay is skipped. "
                          "Pass --progress-text '' to disable.")
+    ap.add_argument("--progress-fontsize", type=int, default=_DEFAULT_PROGRESS_FONTSIZE,
+                    help=f"Font size for the disp-tester progress overlay (range 8..48, "
+                         f"per disp-tester's set-metadata-fontsize). Bump higher for "
+                         f"viewing from across the room; the overlay box auto-sizes "
+                         f"around the text. Ignored when --progress-text is empty "
+                         f"(default: {_DEFAULT_PROGRESS_FONTSIZE})")
 
     # Output
     ap.add_argument("--output", required=True, help="Path to write the CSV")
@@ -473,6 +506,13 @@ def main():
                   f"available: {{step}} {{total}} {{brightness_pct}}; "
                   f"disabling overlay", file=sys.stderr)
             args.progress_text = ""
+
+    # disp-tester accepts only 8..48 - bail early on bad input rather than
+    # silently dropping the fontsize call later.
+    if not (8 <= args.progress_fontsize <= 48):
+        print(f"error: --progress-fontsize must be 8..48 "
+              f"(got {args.progress_fontsize})", file=sys.stderr)
+        return 1
 
     # Validate sweep bounds
     if not (0 <= args.start <= 100) or not (0 <= args.end <= 100):
@@ -583,10 +623,13 @@ def main():
 
     # Show an initial overlay message while warmup + first measurement are
     # in flight, so the operator sees something between pre-cmd completion
-    # and the first per-step update. Disp-tester defaults to `autohide`,
-    # so we explicitly enable visibility once before the first text call.
+    # and the first per-step update. Disp-tester defaults to `autohide`
+    # status and 16px font, neither of which is what we want for an
+    # operator-visible progress display - explicitly set both once before
+    # the first text call.
     if args.progress_text:
         enable_overlay_visibility()
+        set_overlay_fontsize(args.progress_fontsize)
         set_overlay_text(_INITIAL_OVERLAY_TEXT)
 
     # Optional warmup: jump to the start brightness up-front and sleep, so
