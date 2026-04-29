@@ -158,6 +158,17 @@ def measure_nits(max_retries, retry_sleep_s):
 # To explicitly disable the defaults even when launcher-client IS installed,
 # pass --pre-cmd '' (empty string).
 
+# Live progress overlay shown via disp-tester's `text` command (bottom-right
+# corner, semi-transparent black box, 16px white text). \\n in the template
+# renders as a newline on disp-tester's overlay. Available format placeholders:
+#   {step} {total} {brightness_pct}
+_DEFAULT_PROGRESS_TEMPLATE = (
+    "Brightness Calibration in Progress\\n"
+    "Step: {step}/{total}\\n"
+    "Brightness: {brightness_pct}%"
+)
+_INITIAL_OVERLAY_TEXT = "Starting calibration sweep..."
+
 _DEFAULT_LAUNCHER_CLIENT = os.path.expanduser("~/micropanel/usr/bin/launcher-client")
 
 # Two-step pre-cmd: ask qt-demo-launcher (port 8081) to start the
@@ -204,13 +215,14 @@ def validate_output_path(path):
 
 
 def apply_platform_defaults(args):
-    """If --pre-cmd / --post-cmd weren't supplied (None), fill in the
-    platform default when the referenced launcher-client binary is
-    executable. Otherwise leave as empty (skip). Explicit empty strings
+    """If --pre-cmd / --post-cmd / --progress-text weren't supplied (None),
+    fill in the platform default when the referenced launcher-client binary
+    is executable. Otherwise leave as empty (skip). Explicit empty strings
     from the command line are preserved so the user can opt out."""
     launcher_present = os.access(_DEFAULT_LAUNCHER_CLIENT, os.X_OK)
     for attr, default in (("pre_cmd", _DEFAULT_PRE_CMD),
-                          ("post_cmd", _DEFAULT_POST_CMD)):
+                          ("post_cmd", _DEFAULT_POST_CMD),
+                          ("progress_text", _DEFAULT_PROGRESS_TEMPLATE)):
         if getattr(args, attr) is None:
             if launcher_present:
                 setattr(args, attr, default)
@@ -218,6 +230,34 @@ def apply_platform_defaults(args):
                       f"(launcher-client detected)", file=sys.stderr)
             else:
                 setattr(args, attr, "")
+
+
+def _shell_escape_sq(s):
+    """Escape any single quotes in s so it's safe inside a single-quoted
+    shell argument (the standard '\\'' trick)."""
+    return s.replace("'", "'\\''")
+
+
+def set_overlay_text(message):
+    """Push `message` to disp-tester's bottom-right text overlay via
+    launcher-client. Fire-and-forget with a short timeout so a slow or
+    sick disp-tester can't drag the sweep out of timing. Caller is
+    responsible for gating on whether the overlay is enabled (typically
+    `if args.progress_text:`)."""
+    if not message:
+        return
+    # disp-tester wraps the message in double quotes when parsing
+    # `text "..."`, so embedded `"` would confuse it. Strip them.
+    sanitized = message.replace('"', '')
+    cmd = (f'{_DEFAULT_LAUNCHER_CLIENT} --srv=127.0.0.1:8082 '
+           f'--command=\'text "{_shell_escape_sq(sanitized)}"\' --timeoutsec=1')
+    try:
+        subprocess.run(["sh", "-c", cmd],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       timeout=2)
+    except (subprocess.TimeoutExpired, OSError):
+        pass  # overlay update is best-effort - never block the sweep
 
 
 def run_pre_cmd(cmd):
@@ -348,6 +388,14 @@ def main():
                          "this many seconds before measuring step 1. Useful when the panel "
                          "or colorimeter benefits from extra time to settle on the first "
                          "row (default: 0 = skip)")
+    ap.add_argument("--progress-text", default=None,
+                    help="Format template for the bottom-right progress overlay shown via "
+                         "disp-tester's `text` command. Available placeholders: "
+                         "{step} {total} {brightness_pct}. Use \\n for line breaks. "
+                         "If omitted, defaults to a 3-line 'Brightness Calibration in "
+                         "Progress / Step / Brightness' template when launcher-client is "
+                         "installed; otherwise the overlay is skipped. "
+                         "Pass --progress-text '' to disable.")
 
     # Output
     ap.add_argument("--output", required=True, help="Path to write the CSV")
@@ -363,6 +411,16 @@ def main():
     # 5-minute sweep on a destination that turns out to need sudo.
     if not validate_output_path(args.output):
         return 1
+
+    # Validate the progress-text template once now (rather than once per step).
+    if args.progress_text:
+        try:
+            args.progress_text.format(step=1, total=100, brightness_pct=50)
+        except (KeyError, IndexError) as e:
+            print(f"warning: --progress-text references unknown placeholder {e}; "
+                  f"available: {{step}} {{total}} {{brightness_pct}}; "
+                  f"disabling overlay", file=sys.stderr)
+            args.progress_text = ""
 
     # Validate sweep bounds
     if not (0 <= args.start <= 100) or not (0 <= args.end <= 100):
@@ -464,6 +522,12 @@ def main():
         _restore_and_write()
         return 2
 
+    # Show an initial overlay message while warmup + first measurement are
+    # in flight, so the operator sees something between pre-cmd completion
+    # and the first per-step update.
+    if args.progress_text:
+        set_overlay_text(_INITIAL_OVERLAY_TEXT)
+
     # Optional warmup: jump to the start brightness up-front and sleep, so
     # the panel and colorimeter have time to settle before step 1's reading
     # (in addition to the per-step --settle-seconds).
@@ -495,6 +559,17 @@ def main():
                 print(f"abort: {aborted_reason}", file=sys.stderr)
                 break
             continue
+
+        # Update the bottom-right overlay before settling so it's already in
+        # place when the colorimeter reads. Best-effort - failures don't
+        # interrupt the sweep.
+        if args.progress_text:
+            try:
+                msg = args.progress_text.format(step=idx, total=len(steps),
+                                                brightness_pct=int(pct))
+                set_overlay_text(msg)
+            except (KeyError, IndexError):
+                pass  # already validated at startup, but defensive
 
         time.sleep(args.settle_seconds)
         nits, retries = measure_nits(args.max_retries, args.retry_sleep)
