@@ -11,6 +11,7 @@
 #include "als-dimmer/sensors/can_als_sensor.hpp"
 #include "als-dimmer/sensors/null_sensor.hpp"
 #include "als-dimmer/brightness_to_nits_lut.hpp"
+#include "als-dimmer/thermal_compensation.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <memory>
@@ -158,7 +159,8 @@ std::string processCommand(const std::string& command,
                           als_dimmer::Notifier& notifier,
                           bool sensor_available,
                           const als_dimmer::BrightnessToNitsLut& b2n_lut,
-                          const std::string& output_type) {
+                          const std::string& output_type,
+                          const als_dimmer::ThermalCompensation& thermal) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -200,6 +202,13 @@ std::string processCommand(const std::string& command,
                         bool clamped_unused = false;
                         nits = b2n_lut.pctToNits(static_cast<double>(current_brightness),
                                                  clamped_unused);
+                        // Apply thermal correction so the reported nits matches
+                        // what a colorimeter would actually measure right now.
+                        // factor() returns 1.0 when thermal compensation is
+                        // disabled or has no temp reading - so when the feature
+                        // is off, this multiplication is a no-op and behavior
+                        // is bit-identical to before the feature was added.
+                        nits *= thermal.factor();
                     }
 
                     return generateStatusResponse(
@@ -209,7 +218,10 @@ std::string processCommand(const std::string& command,
                         zone_name,
                         sensor_available ? "available" : "unavailable",
                         calibrated,
-                        nits
+                        nits,
+                        thermal.isEnabled(),
+                        thermal.hasReading() ? thermal.lastTempC() : 0.0,
+                        thermal.factor()
                     );
                 }
 
@@ -327,10 +339,23 @@ std::string processCommand(const std::string& command,
                     data["output_type"] = output_type;
                     data["calibrated"] = b2n_lut.is_loaded();
                     if (b2n_lut.is_loaded()) {
+                        // LUT-intrinsic min/max - constant for the panel,
+                        // does NOT vary with thermal compensation. Slider
+                        // UIs reading this can rely on a stable range.
                         data["calibration_min_nits"] = b2n_lut.min_nits();
                         data["calibration_max_nits"] = b2n_lut.max_nits();
                         if (!b2n_lut.label().empty()) {
                             data["calibration_label"] = b2n_lut.label();
+                        }
+                    }
+                    // Thermal-compensation diagnostics (additive).
+                    data["thermal_enabled"] = thermal.isEnabled();
+                    if (thermal.isEnabled()) {
+                        data["thermal_reference_temp_c"] = thermal.referenceTempC();
+                        data["thermal_factor_min"] = thermal.minFactor();
+                        data["thermal_factor_max"] = thermal.maxFactor();
+                        if (!thermal.label().empty()) {
+                            data["thermal_label"] = thermal.label();
                         }
                     }
                     return generateConfigResponse(data);
@@ -340,6 +365,7 @@ std::string processCommand(const std::string& command,
                     json data;
                     data["calibrated"] = b2n_lut.is_loaded();
                     if (b2n_lut.is_loaded()) {
+                        // LUT-intrinsic values - constant for the panel.
                         data["min_nits"] = b2n_lut.min_nits();
                         data["max_nits"] = b2n_lut.max_nits();
                         data["label"] = b2n_lut.label();
@@ -351,6 +377,23 @@ std::string processCommand(const std::string& command,
                         data["label"] = "";
                         data["output_type"] = "";
                         data["row_count"] = 0;
+                    }
+                    // Thermal-compensation diagnostics (additive). Old clients
+                    // that don't read these keys are unaffected.
+                    data["thermal_enabled"] = thermal.isEnabled();
+                    if (thermal.isEnabled()) {
+                        data["thermal_label"] = thermal.label();
+                        data["thermal_reference_temp_c"] = thermal.referenceTempC();
+                        data["thermal_factor_min"] = thermal.minFactor();
+                        data["thermal_factor_max"] = thermal.maxFactor();
+                        data["thermal_row_count"] = static_cast<int>(thermal.rowCount());
+                        if (thermal.hasReading()) {
+                            data["backlight_temp_c"] = thermal.lastTempC();
+                            data["thermal_factor"] = thermal.factor();
+                        } else {
+                            data["backlight_temp_c"] = nullptr;
+                            data["thermal_factor"] = nullptr;
+                        }
                     }
                     return generateResponse(ResponseStatus::SUCCESS,
                                           "Calibration info retrieved", data);
@@ -364,7 +407,10 @@ std::string processCommand(const std::string& command,
                         bool clamped_unused = false;
                         double nits = b2n_lut.pctToNits(static_cast<double>(current_brightness),
                                                        clamped_unused);
-                        data["nits"] = nits;
+                        // Apply thermal correction. factor() is 1.0 when
+                        // thermal compensation is disabled, so this is a
+                        // no-op for unaffected configs.
+                        data["nits"] = nits * thermal.factor();
                     } else {
                         data["nits"] = nullptr;
                     }
@@ -387,12 +433,22 @@ std::string processCommand(const std::string& command,
                         return generateErrorResponse("nits must be >= 0", "INVALID_PARAMS");
                     }
 
+                    // Inverse-thermal-correct the target before LUT lookup so
+                    // the brightness % we choose is the one that produces the
+                    // user-requested nits AT THE CURRENT TEMPERATURE. When
+                    // thermal compensation is disabled, factor() == 1.0 and
+                    // this is a no-op vs prior behavior.
+                    double tc_factor = thermal.factor();
+                    double scaled_target = (tc_factor > 0.0)
+                                            ? target_nits / tc_factor
+                                            : target_nits;
                     bool clamped = false;
-                    double pct = b2n_lut.nitsToPct(target_nits, clamped);
+                    double pct = b2n_lut.nitsToPct(scaled_target, clamped);
                     int brightness = std::max(0, std::min(100, static_cast<int>(pct + 0.5)));
                     bool actual_clamped_unused = false;
                     double actual_nits = b2n_lut.pctToNits(static_cast<double>(brightness),
-                                                          actual_clamped_unused);
+                                                          actual_clamped_unused)
+                                         * tc_factor;
 
                     state_mgr.setManualBrightness(brightness);
                     manual_override_occurred = true;
@@ -561,6 +617,29 @@ int main(int argc, char* argv[]) {
         LOG_INFO("main", "brightness_to_nits calibration disabled or not configured");
     }
 
+    // Load thermal compensation (optional). Same fail-soft semantics as
+    // brightness_to_nits: if anything's wrong, the daemon runs identically
+    // to before this feature existed (factor() returns 1.0 always).
+    als_dimmer::ThermalCompensation thermal;
+    if (config.thermal_compensation.enabled &&
+        !config.thermal_compensation.factor_table.empty()) {
+        if (thermal.loadFactorTable(config.thermal_compensation.factor_table)) {
+            if (config.thermal_compensation.temp_command.empty()) {
+                LOG_WARN("main", "thermal_compensation.factor_table loaded but "
+                         "temp_command is empty - polling not started, "
+                         "compensation will not be active");
+            } else {
+                thermal.startPolling(config.thermal_compensation.temp_command,
+                                     config.thermal_compensation.poll_interval_sec);
+            }
+        } else {
+            LOG_WARN("main", "thermal_compensation enabled but factor table "
+                     "failed to load; running without thermal correction");
+        }
+    } else {
+        LOG_INFO("main", "thermal_compensation disabled or not configured");
+    }
+
     // Initialize control interface (TCP and/or Unix sockets)
     als_dimmer::ControlInterface control(config.control);
     if (!control.start()) {
@@ -632,7 +711,8 @@ int main(int argc, char* argv[]) {
                                                   zone_mapper.get(),
                                                   manual_override_occurred, manual_override_type,
                                                   notifier, sensor_available,
-                                                  b2n_lut, output->getType());
+                                                  b2n_lut, output->getType(),
+                                                  thermal);
             control.sendResponseTo(queued.client_fd, response);
             if (queued.close_after_response && queued.client_fd >= 0) {
                 close(queued.client_fd);
@@ -880,6 +960,11 @@ int main(int argc, char* argv[]) {
     }
     state_mgr.save();
     control.stop();
+    // Explicitly join the thermal polling thread before destructors run, so
+    // logs are tidy and we don't risk a race against `thermal` going out of
+    // scope while it's still polling. The destructor would do the same, but
+    // doing it here makes ordering explicit and lets us log a clean message.
+    thermal.stopPolling();
 
     LOG_INFO("main", "Exiting");
     return 0;

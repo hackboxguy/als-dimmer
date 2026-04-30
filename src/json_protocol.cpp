@@ -77,7 +77,10 @@ std::string generateStatusResponse(const std::string& mode,
                                    const std::string& current_zone,
                                    const std::string& sensor_status,
                                    bool calibrated,
-                                   double nits) {
+                                   double nits,
+                                   bool thermal_enabled,
+                                   double backlight_temp_c,
+                                   double thermal_factor) {
     json data;
     data["mode"] = mode;  // Now accepts: "auto", "manual", or "manual_temporary"
     data["brightness"] = current_brightness;
@@ -89,6 +92,17 @@ std::string generateStatusResponse(const std::string& mode,
         data["nits"] = nits;
     } else {
         data["nits"] = nullptr;
+    }
+    // Thermal compensation diagnostics. Always present so client schemas
+    // are stable; null/false when the feature is off so existing clients
+    // ignoring these fields are unaffected.
+    data["thermal_enabled"] = thermal_enabled;
+    if (thermal_enabled) {
+        data["backlight_temp_c"] = backlight_temp_c;
+        data["thermal_factor"] = thermal_factor;
+    } else {
+        data["backlight_temp_c"] = nullptr;
+        data["thermal_factor"] = nullptr;
     }
 
     return generateResponse(ResponseStatus::SUCCESS,

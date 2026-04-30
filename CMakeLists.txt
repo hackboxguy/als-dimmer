@@ -22,6 +22,7 @@ set(CORE_SOURCES
     src/csv_logger.cpp
     src/notifier.cpp
     src/brightness_to_nits_lut.cpp
+    src/thermal_compensation.cpp
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
     src/sensors/fpga_opti4001_sensor.cpp

@@ -127,11 +127,13 @@ struct CalibrationConfig {
 struct BrightnessToNitsConfig {
     bool enabled = false;
     std::string sweep_table;  // Path to CSV produced by tools/als-dimmer-sweep.py
-    // Reserved for future thermal compensation:
-    //   bool thermal_compensation_enabled = false;
-    //   std::string cold_sweep_table;
-    //   std::string hot_sweep_table;
-    //   int warmup_minutes = 30;
+};
+
+struct ThermalCompensationConfig {
+    bool enabled = false;
+    std::string factor_table;          // Path to CSV produced by tools/thermal-factor.py
+    std::string temp_command;          // Shell command that prints current backlight temp in degC
+    int poll_interval_sec = 30;        // How often to run temp_command
 };
 
 struct Config {
@@ -142,6 +144,7 @@ struct Config {
     NotificationConfig notification;
     CalibrationConfig calibration;
     BrightnessToNitsConfig brightness_to_nits;
+    ThermalCompensationConfig thermal_compensation;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);

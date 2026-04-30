@@ -54,16 +54,29 @@ std::string generateResponse(ResponseStatus status,
                             const json& data = json::object());
 
 // Generate status response (for GET_STATUS command)
-// sensor_status: "available" or "unavailable" - lets clients grey out the AUTO toggle.
-// calibrated:    true if a brightness->nits LUT is loaded; when false, `nits`
-//                is omitted from the JSON ("nits": null) and the value is ignored.
+// sensor_status:    "available" or "unavailable" - lets clients grey out the AUTO toggle.
+// calibrated:       true if a brightness->nits LUT is loaded; when false, `nits`
+//                   is omitted from the JSON ("nits": null) and the value is ignored.
+// thermal_enabled:  true if a thermal-compensation factor table is loaded AND polling is active.
+//                   When false, backlight_temp_c and thermal_factor are emitted as null
+//                   and clients can ignore them. Additive: existing clients that don't
+//                   look at the thermal_* fields are unaffected.
+// backlight_temp_c: most recent successful temperature reading (only meaningful when
+//                   thermal_enabled and thermal.hasReading()).
+// thermal_factor:   the multiplicative correction currently being applied to LUT-predicted
+//                   nits. Always emitted (not null) when thermal_enabled is true; equals 1.0
+//                   when no temp reading is available yet so callers can multiply
+//                   unconditionally.
 std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
                                    const std::string& current_zone,
                                    const std::string& sensor_status = "available",
                                    bool calibrated = false,
-                                   double nits = 0.0);
+                                   double nits = 0.0,
+                                   bool thermal_enabled = false,
+                                   double backlight_temp_c = 0.0,
+                                   double thermal_factor = 1.0);
 
 // Generate config response (for GET_CONFIG command)
 std::string generateConfigResponse(const json& config_data);

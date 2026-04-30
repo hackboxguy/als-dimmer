@@ -311,6 +311,38 @@ Config Config::loadFromFile(const std::string& filename) {
         }
     }
 
+    // Parse thermal_compensation configuration (optional). Like
+    // brightness_to_nits this is purely additive - existing configs without
+    // this block parse identically and the daemon behaves as before.
+    if (j.contains("thermal_compensation")) {
+        auto& tc_json = j["thermal_compensation"];
+        if (tc_json.contains("enabled")) {
+            config.thermal_compensation.enabled = tc_json["enabled"].get<bool>();
+        }
+        if (tc_json.contains("factor_table")) {
+            config.thermal_compensation.factor_table = tc_json["factor_table"].get<std::string>();
+        }
+        if (tc_json.contains("temp_command")) {
+            config.thermal_compensation.temp_command = tc_json["temp_command"].get<std::string>();
+        }
+        if (tc_json.contains("poll_interval_sec")) {
+            config.thermal_compensation.poll_interval_sec =
+                tc_json["poll_interval_sec"].get<int>();
+        }
+
+        // Same config-file-relative path resolution as brightness_to_nits
+        // so the shipped factor tables work without CMAKE_INSTALL_PREFIX
+        // surgery. Absolute paths pass through unchanged.
+        if (!config.thermal_compensation.factor_table.empty() &&
+            config.thermal_compensation.factor_table[0] != '/') {
+            size_t slash = filename.find_last_of('/');
+            if (slash != std::string::npos) {
+                config.thermal_compensation.factor_table =
+                    filename.substr(0, slash + 1) + config.thermal_compensation.factor_table;
+            }
+        }
+    }
+
     // Parse calibration configuration (optional)
     if (j.contains("calibration")) {
         auto& calib_json = j["calibration"];
