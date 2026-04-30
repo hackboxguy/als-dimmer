@@ -32,6 +32,38 @@ for the sweep duration, and restores on exit (or on Ctrl-C, with a partial CSV
 written so an interrupted run is never wasted). Pure stdlib Python — no pip
 dependencies.
 
+## `thermal-factor.py` — temperature-vs-nits factor table generator
+
+Converts a "panel running at 100% over a warm-up period" measurement log
+into a small CSV the daemon can use to undo backlight thermal drift. Pairs
+with the daemon's optional `thermal_compensation` config block.
+
+Workflow:
+
+1. Run a side script (your existing live-measurements logger) that records
+   `Y` (nits), `backlight_temp_c`, and `als_brightness_pct` every 30s while
+   the panel sits at 100% brightness from cold to thermal equilibrium.
+2. Run `thermal-factor.py` to convert that log into a factor CSV. Pick a
+   reference temperature — ideally the temperature at which your
+   brightness sweep was taken; else just the coldest measured temp:
+
+   ```bash
+   ./thermal-factor.py \
+       --input  raw_temp_log.csv \
+       --output calibrations/your_panel_thermal_factor.csv \
+       --label  warm
+   ```
+3. Add `thermal_compensation` to your config and point `factor_table` at
+   the CSV produced above. Restart the daemon.
+
+The script bins measurements into 0.5°C slots (configurable), applies a
+rolling-mean smoothing, and emits one row per bin with
+`factor = nits(temp) / nits(reference_temp)`. See `--help` for tuning knobs.
+
+**Per-panel re-derivation is recommended for production accuracy** — like the
+brightness LUT, factor tables shipped in the repo are reference data swept
+on one specific unit and panel-to-panel variation is normal.
+
 ## `als-dimmer-client` — daemon control utility
 
 Built and installed alongside the daemon. See `als-dimmer-client --help` for the

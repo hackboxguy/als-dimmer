@@ -215,7 +215,7 @@ printf '{"version":"1.0","command":"get_status"}' | nc -w 1 -U /tmp/als-dimmer.s
 - `adjust_brightness` - Adjust brightness by delta value (-100 to +100)
 - `get_absolute_brightness` - Get current brightness in nits. Returns `{"nits": null, "calibrated": false}` when no LUT is loaded.
 - `set_absolute_brightness` - Set brightness via a target in nits (`{"nits": 750}`). Inverse-interpolates through the loaded LUT to a brightness %. Out-of-range targets are clamped with a `clamped: true` flag. Errors `CALIBRATION_NOT_LOADED` when no LUT is loaded.
-- `get_calibration_info` - Get LUT diagnostics: `min_nits`, `max_nits`, `label`, `output_type`, `row_count`. Returns `{"calibrated": false}` when uncalibrated.
+- `get_calibration_info` - Get LUT diagnostics: `min_nits`, `max_nits`, `label`, `output_type`, `row_count`. Returns `{"calibrated": false}` when uncalibrated. Also reports thermal-compensation state when enabled (`thermal_enabled`, `backlight_temp_c`, `thermal_factor`, `thermal_reference_temp_c`, `thermal_factor_min`/`_max`, `thermal_label`).
 
 ## Operating Modes
 
@@ -271,6 +271,37 @@ A reference LUT for BOE displays is shipped pre-enabled in
 variation of 5–15% is normal; for accurate readings on your panel, run
 `tools/als-dimmer-sweep.py` (drives the daemon's `set_brightness` and a
 colorimeter through `spotread`) and replace the file.
+
+### Thermal compensation (optional)
+
+The brightness-to-nits LUT captures the panel's response at the temperature
+the sweep was taken at. Once the panel reaches thermal equilibrium (~30 min
+after power-on), LED junction efficiency and phosphor yield drop and the
+same brightness % produces 4–8% fewer nits. To compensate, the daemon can
+optionally:
+
+1. Poll a user-supplied shell command to read backlight temperature (e.g.
+   via the F1KM I2C NTC: `disptool --device=ioc --command=bltemp ...`)
+2. Look up a multiplicative correction factor in a small CSV (produced by
+   `tools/thermal-factor.py` from a "panel running at 100% over a warm-up
+   period" measurement log)
+3. Apply that factor to all nits readings on both the GET and SET paths
+
+Config block:
+
+```json
+"thermal_compensation": {
+  "enabled": true,
+  "factor_table": "calibrations/dimmer_2048_thermal_factor.csv",
+  "temp_command": "disptool --device=ioc --command=bltemp --autotestformat | sed -E 's/^.*Temperature[^:]*:\\s*([0-9.-]+).*/\\1/'",
+  "poll_interval_sec": 30
+}
+```
+
+The block is **optional** and **disabled by default** in shipped configs:
+without it, the daemon behaves exactly as if the feature didn't exist.
+When the temp command keeps failing, factor falls back to 1.0 so
+brightness-to-nits readings stay sensible even if the temp source breaks.
 
 ## Troubleshooting
 

@@ -363,7 +363,17 @@ All communication uses structured JSON messages for reliability and extensibilit
     "zone": "indoor",
     "sensor_status": "available",      // or "unavailable" - see NullSensor fallback
     "calibrated": true,                // brightness->nits LUT loaded?
-    "nits": 749.2                      // null when calibrated=false
+    "nits": 749.2,                     // null when calibrated=false; thermal-corrected
+                                       //   when thermal_enabled=true (i.e. the value
+                                       //   matches what a colorimeter would see now)
+    "thermal_enabled": false,          // true when thermal compensation is configured AND
+                                       //   polling is active. When false the next two
+                                       //   fields are null.
+    "backlight_temp_c": null,          // most recent successful temperature reading (degC),
+                                       //   or null when thermal_enabled=false / no read yet
+    "thermal_factor": null             // current multiplicative correction (1.0 when
+                                       //   factor=reference temp, <1.0 when hotter), or
+                                       //   null when thermal_enabled=false
   }
 }
 ```
@@ -547,6 +557,18 @@ Lighter than `get_config` for clients that just need the LUT range/metadata.
 > `brightness_to_nits` block, which loads a static `% -> nits` lookup table for
 > the absolute-brightness API. Both can be enabled simultaneously without
 > interaction.
+
+> **Thermal compensation (optional):** a third independent block,
+> `thermal_compensation`, layers a temperature-driven multiplicative
+> correction on top of the brightness_to_nits LUT. The daemon polls a
+> user-supplied `temp_command` on a configurable interval, looks up the
+> current temperature in a factor table (produced by tools/thermal-factor.py),
+> and applies the factor to all nits values reported by GET_STATUS,
+> GET_ABSOLUTE_BRIGHTNESS, and SET_ABSOLUTE_BRIGHTNESS. The block is
+> opt-in and fail-soft: when missing, disabled, or misconfigured the
+> daemon runs identically to a no-thermal-compensation deployment. When
+> active, the additional fields documented in GET_STATUS and
+> GET_CALIBRATION_INFO surface the live temperature and factor.
 
 ### Error Responses
 
