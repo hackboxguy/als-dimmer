@@ -1,5 +1,6 @@
 {
   "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific FPGA dimmer2048 + display unit; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/dimmer_2048.csv. Path is resolved relative to this config file's directory.",
+  "_comment_thermal_compensation": "thermal_compensation undoes the 4-8% nits drop that happens once the panel reaches thermal equilibrium (LED + phosphor temp coefficient). Enabled by default for the BOE/dimmer2048 image because `disptool --command=bltemp` is part of micropanel; if you're targeting a system without disptool, set thermal_compensation.enabled=false or replace temp_command. Like the brightness LUT, the factor_table is REFERENCE data swept on one specific unit - re-run tools/thermal-factor.py for production accuracy. The daemon fails soft: if temp_command stops responding, factor() returns 1.0 and the daemon falls back to uncorrected behavior, never hangs.",
 
   "sensor": {
     "type": "fpga_opti4001",
@@ -77,5 +78,12 @@
   "brightness_to_nits": {
     "enabled": true,
     "sweep_table": "calibrations/dimmer_2048.csv"
+  },
+
+  "thermal_compensation": {
+    "enabled": true,
+    "factor_table": "calibrations/dimmer_2048_thermal_factor.csv",
+    "temp_command": "disptool --device=ioc --command=bltemp --autotestformat | sed -E 's/^.*Temperature[^:]*:\\s*([0-9.-]+).*/\\1/'",
+    "poll_interval_sec": 30
   }
 }
