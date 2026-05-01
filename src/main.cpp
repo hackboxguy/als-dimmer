@@ -626,13 +626,35 @@ int main(int argc, char* argv[]) {
     if (config.thermal_compensation.enabled &&
         !config.thermal_compensation.factor_table.empty()) {
         if (thermal.loadFactorTable(config.thermal_compensation.factor_table)) {
-            if (config.thermal_compensation.temp_command.empty()) {
-                LOG_WARN("main", "thermal_compensation.factor_table loaded but "
-                         "temp_command is empty - polling not started, "
-                         "compensation will not be active");
-            } else {
+            // Configure direct-I2C source first (if any) so startPolling()
+            // can wire up the i2c-primary / command-fallback cascade.
+            const auto& i2c = config.thermal_compensation.i2c_temp_source;
+            bool i2c_configured = false;
+            if (!i2c.device.empty()) {
+                try {
+                    uint8_t addr = static_cast<uint8_t>(
+                        std::stoul(i2c.address, nullptr, 16));
+                    uint16_t reg = static_cast<uint16_t>(
+                        std::stoul(i2c.register_addr, nullptr, 16));
+                    thermal.configureI2cSource(i2c.device, addr, reg, i2c.scale);
+                    i2c_configured = true;
+                } catch (const std::exception& e) {
+                    LOG_WARN("main", "thermal_compensation.i2c_temp_source "
+                             "address/register parse failed: " << e.what()
+                             << " - direct-I2C source disabled");
+                }
+            }
+
+            // Polling path. If neither i2c nor command is configured, log
+            // a warning - the LUT loaded but compensation can't fire.
+            if (i2c_configured ||
+                !config.thermal_compensation.temp_command.empty()) {
                 thermal.startPolling(config.thermal_compensation.temp_command,
                                      config.thermal_compensation.poll_interval_sec);
+            } else {
+                LOG_WARN("main", "thermal_compensation.factor_table loaded but "
+                         "neither i2c_temp_source nor temp_command is configured "
+                         "- polling not started, compensation will not be active");
             }
         } else {
             LOG_WARN("main", "thermal_compensation enabled but factor table "

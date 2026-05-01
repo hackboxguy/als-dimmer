@@ -5,9 +5,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
+#include <fcntl.h>
 #include <fstream>
+#include <linux/i2c.h>
+#include <linux/i2c-dev.h>
 #include <regex>
 #include <sstream>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 namespace als_dimmer {
 
@@ -142,15 +148,30 @@ bool ThermalCompensation::loadFactorTable(const std::string& path) {
     return true;
 }
 
+void ThermalCompensation::configureI2cSource(const std::string& device,
+                                             uint8_t i2c_address,
+                                             uint16_t register_addr,
+                                             double scale) {
+    if (polling_started_) {
+        LOG_WARN("ThermalCompensation", "configureI2cSource() called after polling already "
+                 "started; ignoring (call before startPolling)");
+        return;
+    }
+    i2c_device_ = device;
+    i2c_address_ = i2c_address;
+    i2c_register_ = register_addr;
+    i2c_scale_ = scale;
+}
+
 void ThermalCompensation::startPolling(const std::string& temp_command,
                                        int poll_interval_sec) {
     if (polling_started_) {
         LOG_WARN("ThermalCompensation", "startPolling() called twice; ignoring");
         return;
     }
-    if (temp_command.empty()) {
-        LOG_WARN("ThermalCompensation", "startPolling() called with empty temp_command; "
-                 "thermal compensation will not be active");
+    if (temp_command.empty() && i2c_device_.empty()) {
+        LOG_WARN("ThermalCompensation", "startPolling() called with neither temp_command "
+                 "nor i2c_temp_source configured; thermal compensation will not be active");
         return;
     }
     if (!table_loaded_) {
@@ -163,7 +184,16 @@ void ThermalCompensation::startPolling(const std::string& temp_command,
     stop_requested_.store(false);
     polling_started_ = true;
     poll_thread_ = std::thread(&ThermalCompensation::pollLoop, this);
-    LOG_INFO("ThermalCompensation", "Polling started (interval " << poll_interval_sec_ << "s)");
+    if (!i2c_device_.empty() && !temp_command_.empty()) {
+        LOG_INFO("ThermalCompensation", "Polling started (interval " << poll_interval_sec_
+                 << "s), I2C primary + command fallback");
+    } else if (!i2c_device_.empty()) {
+        LOG_INFO("ThermalCompensation", "Polling started (interval " << poll_interval_sec_
+                 << "s), I2C source only");
+    } else {
+        LOG_INFO("ThermalCompensation", "Polling started (interval " << poll_interval_sec_
+                 << "s), command source only");
+    }
 }
 
 void ThermalCompensation::stopPolling() {
@@ -194,61 +224,150 @@ void ThermalCompensation::pollLoop() {
     }
 }
 
-void ThermalCompensation::runOneTempCheck() {
-    // popen() runs through /bin/sh -c so shell pipelines (which is how most
-    // temp sources are expressed) work as written. The command is responsible
-    // for its own stderr handling - we only capture stdout.
+bool ThermalCompensation::readTempViaI2c(double* out) {
+    if (i2c_device_.empty()) return false;
+
+    int fd = open(i2c_device_.c_str(), O_RDWR);
+    if (fd < 0) return false;
+
+    // Bind the slave address. Reusing this fd for multiple ioctl calls is
+    // fine - the I2C_SLAVE binding sticks until we close the fd.
+    if (ioctl(fd, I2C_SLAVE, i2c_address_) < 0) {
+        close(fd);
+        return false;
+    }
+
+    // Atomic write-subaddress + read-2-bytes via I2C_RDWR. Both messages
+    // run under the kernel's bus_lock as one transaction so other
+    // userspace clients reading the same slave can't interleave between
+    // the address-pointer write and the data read.
+    uint8_t reg_buf[2] = {
+        static_cast<uint8_t>((i2c_register_ >> 8) & 0xff),
+        static_cast<uint8_t>(i2c_register_ & 0xff)
+    };
+    uint8_t data[2] = {0, 0};
+    struct i2c_msg msgs[2];
+    msgs[0].addr  = i2c_address_;
+    msgs[0].flags = 0;          // write
+    msgs[0].len   = 2;
+    msgs[0].buf   = reg_buf;
+    msgs[1].addr  = i2c_address_;
+    msgs[1].flags = I2C_M_RD;   // read
+    msgs[1].len   = 2;
+    msgs[1].buf   = data;
+    struct i2c_rdwr_ioctl_data xact;
+    xact.msgs  = msgs;
+    xact.nmsgs = 2;
+
+    int rc = ioctl(fd, I2C_RDWR, &xact);
+    close(fd);
+    if (rc < 0) return false;
+
+    // F1KM format: signed int16, big-endian on the wire, value * scale = degC.
+    int16_t raw = static_cast<int16_t>((data[0] << 8) | data[1]);
+    *out = static_cast<double>(raw) * i2c_scale_;
+    return true;
+}
+
+bool ThermalCompensation::readTempViaCommand(double* out) {
+    if (temp_command_.empty()) return false;
+
+    // popen() runs through /bin/sh -c so shell pipelines work as written.
+    // The command is responsible for its own stderr handling - we only
+    // capture stdout. Same parsing convention as als-dimmer-sweep.py.
     FILE* p = popen(temp_command_.c_str(), "r");
-    if (!p) {
-        std::lock_guard<std::mutex> lk(mu_);
-        ++consecutive_failures_;
-        if (consecutive_failures_ == 1) {
-            LOG_WARN("ThermalCompensation", "popen() failed for temp_command");
-        }
-        return;
-    }
+    if (!p) return false;
 
-    std::string out;
-    char buf[256];
-    while (fgets(buf, sizeof(buf), p)) {
-        out.append(buf);
-    }
+    std::string buf;
+    char chunk[256];
+    while (fgets(chunk, sizeof(chunk), p)) buf.append(chunk);
     int rc = pclose(p);
-    if (rc != 0) {
+    if (rc != 0) return false;
+
+    double temp = parseTempFromOutput(buf);
+    if (std::isnan(temp)) return false;
+    *out = temp;
+    return true;
+}
+
+void ThermalCompensation::runOneTempCheck() {
+    // Try i2c first when configured. On per-cycle failure, fall through to
+    // the temp_command path (when configured) so transient i2c hiccups don't
+    // cause the daemon to lose temperature visibility.
+    double temp = 0.0;
+    bool got_via_i2c = false;
+    bool i2c_configured = !i2c_device_.empty();
+    bool cmd_configured = !temp_command_.empty();
+
+    if (i2c_configured) {
+        if (readTempViaI2c(&temp)) {
+            got_via_i2c = true;
+        } else {
+            std::lock_guard<std::mutex> lk(mu_);
+            if (!warned_about_i2c_failure_) {
+                warned_about_i2c_failure_ = true;
+                LOG_WARN("ThermalCompensation", "I2C temp read failed at "
+                         << i2c_device_ << " 0x"
+                         << std::hex << static_cast<int>(i2c_address_) << std::dec
+                         << "; will retry next cycle"
+                         << (cmd_configured ? " (falling back to temp_command this cycle)"
+                                            : ""));
+            }
+        }
+    }
+
+    bool got_via_command = false;
+    if (!got_via_i2c && cmd_configured) {
+        if (readTempViaCommand(&temp)) {
+            got_via_command = true;
+            // Note when the command path is being used as a fallback (i.e.
+            // i2c was configured but failed). One-shot log so operators can
+            // see the situation without flooding.
+            if (i2c_configured) {
+                std::lock_guard<std::mutex> lk(mu_);
+                if (!logged_fallback_to_command_) {
+                    logged_fallback_to_command_ = true;
+                    LOG_WARN("ThermalCompensation", "Using temp_command fallback because "
+                             "i2c_temp_source isn't returning data");
+                }
+            }
+        } else {
+            std::lock_guard<std::mutex> lk(mu_);
+            ++consecutive_failures_;
+            if (consecutive_failures_ == 1) {
+                LOG_WARN("ThermalCompensation", "temp_command read failed");
+            }
+        }
+    }
+
+    if (!got_via_i2c && !got_via_command) {
         std::lock_guard<std::mutex> lk(mu_);
         ++consecutive_failures_;
-        if (consecutive_failures_ == 1) {
-            LOG_WARN("ThermalCompensation", "temp_command exited rc=" << rc);
-        }
         return;
     }
 
-    double temp = parseTempFromOutput(out);
-    if (std::isnan(temp)) {
-        std::lock_guard<std::mutex> lk(mu_);
-        ++consecutive_failures_;
-        if (consecutive_failures_ == 1) {
-            LOG_WARN("ThermalCompensation", "could not parse temp from temp_command output");
-        }
-        return;
-    }
-
-    // Success path
-    bool was_warned = false;
+    // Success path - cache the reading
     {
         std::lock_guard<std::mutex> lk(mu_);
         last_temp_c_ = temp;
         last_read_time_ = std::chrono::steady_clock::now();
         bool first_time = !has_reading_;
         has_reading_ = true;
-        was_warned = warned_about_sustained_failure_;
         consecutive_failures_ = 0;
         warned_about_sustained_failure_ = false;
+
         if (first_time) {
-            LOG_INFO("ThermalCompensation", "First temp read OK: " << temp << " C");
+            LOG_INFO("ThermalCompensation", "First temp read OK: " << temp << " C "
+                     << "(via " << (got_via_i2c ? "I2C" : "temp_command") << ")");
+        }
+        // If i2c just recovered from a previous failure, log that visibly
+        if (got_via_i2c && warned_about_i2c_failure_) {
+            warned_about_i2c_failure_ = false;
+            logged_first_i2c_success_ = true;
+            LOG_INFO("ThermalCompensation", "I2C temp source recovered: "
+                     << temp << " C");
         }
     }
-    (void)was_warned;
 }
 
 double ThermalCompensation::parseTempFromOutput(const std::string& output) {

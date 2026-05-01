@@ -129,11 +129,29 @@ struct BrightnessToNitsConfig {
     std::string sweep_table;  // Path to CSV produced by tools/als-dimmer-sweep.py
 };
 
+// Optional direct-I2C temperature source. When `device` is non-empty the daemon
+// reads the temperature register via an I2C_RDWR atomic transaction (no
+// subprocess, no PATH dependency). The kernel serializes I2C bus access so
+// this coexists safely with any other process reading the same slave, as long
+// as everyone uses I2C_RDWR (not legacy split write/read).
+//
+// Format is hardcoded to F1KM-style for v1: 2-byte register subaddress
+// (big-endian on the wire), 2-byte signed int16 response (also big-endian),
+// final value = raw * scale. Add fields here if a future platform needs
+// different widths or byte orders.
+struct I2cTempSourceConfig {
+    std::string device;            // e.g. "/dev/i2c-1"
+    std::string address;           // hex string like "0x66" (7-bit slave address)
+    std::string register_addr;     // hex string like "0x1002" (16-bit subaddress)
+    double scale = 0.1;            // raw_int16 * scale = degC (F1KM uses 0.1)
+};
+
 struct ThermalCompensationConfig {
     bool enabled = false;
     std::string factor_table;          // Path to CSV produced by tools/thermal-factor.py
-    std::string temp_command;          // Shell command that prints current backlight temp in degC
-    int poll_interval_sec = 30;        // How often to run temp_command
+    std::string temp_command;          // Optional: shell command printing degC on stdout
+    I2cTempSourceConfig i2c_temp_source;  // Optional: direct I2C alternative
+    int poll_interval_sec = 30;        // How often to read the temperature
 };
 
 struct Config {

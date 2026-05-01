@@ -61,11 +61,28 @@ public:
     bool loadFactorTable(const std::string& path);
 
     /**
+     * Configure an optional direct-I2C temperature source. When the device
+     * string is non-empty AND startPolling() is later called, each poll
+     * cycle tries this path BEFORE falling back to temp_command (if any).
+     * Hardcoded format for v1: 2-byte register subaddress big-endian on the
+     * wire, 2-byte signed int16 response big-endian, final temp = raw * scale.
+     */
+    void configureI2cSource(const std::string& device,
+                            uint8_t i2c_address,
+                            uint16_t register_addr,
+                            double scale);
+
+    /**
      * Spawn the temperature polling thread. `temp_command` is a shell command
      * that prints the current backlight temperature (in degC) on stdout; the
      * first signed/decimal float in stdout is parsed. `poll_interval_sec`
-     * controls how often the command is run; lower = more responsive
+     * controls how often the command runs; lower = more responsive
      * compensation, higher = lower I2C/CPU load. Safe to call only once.
+     *
+     * If configureI2cSource() was called previously, each poll cycle tries
+     * the I2C path first and falls back to `temp_command` only if the I2C
+     * read errors out. If `temp_command` is empty AND no I2C source is
+     * configured, polling does not start.
      */
     void startPolling(const std::string& temp_command, int poll_interval_sec);
 
@@ -127,6 +144,12 @@ public:
 private:
     void pollLoop();
     void runOneTempCheck();
+
+    // Returns true on success and writes the temperature in degC to *out.
+    // Returns false (without modifying *out) on any kind of error.
+    bool readTempViaI2c(double* out);
+    bool readTempViaCommand(double* out);
+
     static double parseTempFromOutput(const std::string& output);
 
     // Interpolate a factor at the given temp (no locking - caller manages).
@@ -148,6 +171,17 @@ private:
     std::thread poll_thread_;
     std::atomic<bool> stop_requested_{false};
     bool polling_started_ = false;
+
+    // Optional direct-I2C source state (set via configureI2cSource).
+    // i2c_device_.empty() means "no I2C source configured".
+    std::string i2c_device_;
+    uint8_t i2c_address_ = 0;
+    uint16_t i2c_register_ = 0;
+    double i2c_scale_ = 0.1;
+    // Fallback-tracking flags for log throttling - mu_-protected
+    bool warned_about_i2c_failure_ = false;
+    bool logged_first_i2c_success_ = false;
+    bool logged_fallback_to_command_ = false;
 
     // Cached reading state - protected by mu_
     mutable std::mutex mu_;

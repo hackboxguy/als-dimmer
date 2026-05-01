@@ -330,6 +330,25 @@ Config Config::loadFromFile(const std::string& filename) {
                 tc_json["poll_interval_sec"].get<int>();
         }
 
+        // Optional direct-I2C temperature source (preferred over temp_command
+        // when both are present; temp_command serves as the per-cycle fallback).
+        if (tc_json.contains("i2c_temp_source")) {
+            auto& i2c_json = tc_json["i2c_temp_source"];
+            auto& i2c = config.thermal_compensation.i2c_temp_source;
+            if (i2c_json.contains("device")) {
+                i2c.device = i2c_json["device"].get<std::string>();
+            }
+            if (i2c_json.contains("address")) {
+                i2c.address = i2c_json["address"].get<std::string>();
+            }
+            if (i2c_json.contains("register")) {
+                i2c.register_addr = i2c_json["register"].get<std::string>();
+            }
+            if (i2c_json.contains("scale")) {
+                i2c.scale = i2c_json["scale"].get<double>();
+            }
+        }
+
         // Same config-file-relative path resolution as brightness_to_nits
         // so the shipped factor tables work without CMAKE_INSTALL_PREFIX
         // surgery. Absolute paths pass through unchanged.

@@ -1,6 +1,6 @@
 {
   "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific FPGA dimmer2048 + display unit; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/dimmer_2048.csv. Path is resolved relative to this config file's directory.",
-  "_comment_thermal_compensation": "thermal_compensation undoes the 4-8% nits drop that happens once the panel reaches thermal equilibrium (LED + phosphor temp coefficient). Enabled by default for the BOE/dimmer2048 image because `disptool --command=bltemp` is part of micropanel; if you're targeting a system without disptool, set thermal_compensation.enabled=false or replace temp_command. Like the brightness LUT, the factor_table is REFERENCE data swept on one specific unit - re-run tools/thermal-factor.py for production accuracy. The daemon fails soft: if temp_command stops responding, factor() returns 1.0 and the daemon falls back to uncorrected behavior, never hangs.",
+  "_comment_thermal_compensation": "thermal_compensation undoes the 4-8% nits drop that happens once the panel reaches thermal equilibrium (LED + phosphor temp coefficient). Reads the F1KM backlight NTC directly from /dev/i2c-1 slave 0x66 register 0x1002 via I2C_RDWR atomic transactions (kernel serializes against any other client of the same slave). Like the brightness LUT, the factor_table is REFERENCE data swept on one specific unit - re-run tools/thermal-factor.py for production accuracy. The daemon fails soft: if I2C reads fail, the daemon falls back to uncorrected behavior. To use a different temperature source, replace i2c_temp_source with a temp_command shell pipeline (or set both - i2c is preferred per cycle with temp_command as automatic fallback).",
 
   "sensor": {
     "type": "fpga_opti4001",
@@ -83,7 +83,12 @@
   "thermal_compensation": {
     "enabled": true,
     "factor_table": "calibrations/dimmer_2048_thermal_factor.csv",
-    "temp_command": "/home/pi/micropanel/bin/disptool --device=ioc --command=bltemp --autotestformat | sed -E 's/^.*Temperature[^:]*:\\s*([0-9.-]+).*/\\1/'",
+    "i2c_temp_source": {
+      "device": "/dev/i2c-1",
+      "address": "0x66",
+      "register": "0x1002",
+      "scale": 0.1
+    },
     "poll_interval_sec": 30
   }
 }
