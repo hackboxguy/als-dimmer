@@ -211,6 +211,7 @@ std::string processCommand(const std::string& command,
                         nits *= thermal.factor();
                     }
 
+                    bool thermal_has_reading = thermal.hasReading();
                     return generateStatusResponse(
                         mode_str,
                         current_brightness,
@@ -220,8 +221,9 @@ std::string processCommand(const std::string& command,
                         calibrated,
                         nits,
                         thermal.isEnabled(),
-                        thermal.hasReading() ? thermal.lastTempC() : 0.0,
-                        thermal.factor()
+                        thermal_has_reading,
+                        thermal_has_reading ? thermal.lastTempC() : 0.0,
+                        thermal_has_reading ? thermal.factor() : 1.0
                     );
                 }
 

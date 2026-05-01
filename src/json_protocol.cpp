@@ -79,6 +79,7 @@ std::string generateStatusResponse(const std::string& mode,
                                    bool calibrated,
                                    double nits,
                                    bool thermal_enabled,
+                                   bool thermal_has_reading,
                                    double backlight_temp_c,
                                    double thermal_factor) {
     json data;
@@ -93,11 +94,13 @@ std::string generateStatusResponse(const std::string& mode,
     } else {
         data["nits"] = nullptr;
     }
-    // Thermal compensation diagnostics. Always present so client schemas
-    // are stable; null/false when the feature is off so existing clients
-    // ignoring these fields are unaffected.
+    // Thermal compensation diagnostics. thermal_enabled tells the client
+    // whether the feature is configured; the temp/factor fields surface
+    // live data only when there's actually a non-stale reading. Crucially
+    // backlight_temp_c stays null (not 0.0) when no reading has succeeded -
+    // a 0.0 reading would look like a legitimate sub-freezing measurement.
     data["thermal_enabled"] = thermal_enabled;
-    if (thermal_enabled) {
+    if (thermal_enabled && thermal_has_reading) {
         data["backlight_temp_c"] = backlight_temp_c;
         data["thermal_factor"] = thermal_factor;
     } else {

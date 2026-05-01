@@ -57,16 +57,16 @@ std::string generateResponse(ResponseStatus status,
 // sensor_status:    "available" or "unavailable" - lets clients grey out the AUTO toggle.
 // calibrated:       true if a brightness->nits LUT is loaded; when false, `nits`
 //                   is omitted from the JSON ("nits": null) and the value is ignored.
-// thermal_enabled:  true if a thermal-compensation factor table is loaded AND polling is active.
-//                   When false, backlight_temp_c and thermal_factor are emitted as null
-//                   and clients can ignore them. Additive: existing clients that don't
-//                   look at the thermal_* fields are unaffected.
-// backlight_temp_c: most recent successful temperature reading (only meaningful when
-//                   thermal_enabled and thermal.hasReading()).
-// thermal_factor:   the multiplicative correction currently being applied to LUT-predicted
-//                   nits. Always emitted (not null) when thermal_enabled is true; equals 1.0
-//                   when no temp reading is available yet so callers can multiply
-//                   unconditionally.
+// thermal_enabled:     true if a thermal-compensation factor table is loaded AND polling
+//                      is active. When false, the next three fields are emitted as null.
+// thermal_has_reading: true if the polling thread has produced at least one successful
+//                      temp reading AND it isn't stale. Distinct from thermal_enabled -
+//                      the feature can be configured (enabled=true) but not actually
+//                      working (has_reading=false), e.g. because temp_command is failing.
+//                      When false, backlight_temp_c and thermal_factor are null so
+//                      clients can distinguish "no live data" from "data shows 1.0".
+// backlight_temp_c:    most recent successful temperature reading (degC).
+// thermal_factor:      the correction currently being applied to LUT-predicted nits.
 std::string generateStatusResponse(const std::string& mode,
                                    int current_brightness,
                                    float current_lux,
@@ -75,6 +75,7 @@ std::string generateStatusResponse(const std::string& mode,
                                    bool calibrated = false,
                                    double nits = 0.0,
                                    bool thermal_enabled = false,
+                                   bool thermal_has_reading = false,
                                    double backlight_temp_c = 0.0,
                                    double thermal_factor = 1.0);
 
