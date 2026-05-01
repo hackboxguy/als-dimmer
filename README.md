@@ -292,7 +292,7 @@ Config block:
 ```json
 "thermal_compensation": {
   "enabled": true,
-  "factor_table": "calibrations/dimmer_2048_thermal_factor.csv",
+  "factor_table": "calibrations/dimmer_12_3_nq1v1_thermal_factor.csv",
   "temp_command": "disptool --device=ioc --command=bltemp --autotestformat | sed -E 's/^.*Temperature[^:]*:\\s*([0-9.-]+).*/\\1/'",
   "poll_interval_sec": 30
 }

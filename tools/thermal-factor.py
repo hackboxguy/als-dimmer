@@ -44,9 +44,9 @@ Examples:
 
   # Auto-pick the coldest measured temp as the reference
   ./thermal-factor.py \\
-      --input  calibrations/dimmer_2048_temp_nits_relation.csv \\
-      --output calibrations/dimmer_2048_thermal_factor.csv \\
-      --label  dimmer2048_thermal_factor_warm
+      --input  calibrations/dimmer_12_3_nq1v1_temp_nits_relation.csv \\
+      --output calibrations/dimmer_12_3_nq1v1_thermal_factor.csv \\
+      --label  dimmer_12_3_nq1v1_warm
 
   # Explicit reference: use 38 C (typical sweep-time temperature)
   ./thermal-factor.py --input raw.csv --output factor.csv --reference-temp 38.0
