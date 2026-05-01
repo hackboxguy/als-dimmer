@@ -1,5 +1,5 @@
 {
-  "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific FPGA dimmer2048 + 12.3-inch panel; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/dimmer_12_3_nq1v1.csv. Path is resolved relative to this config file's directory.",
+  "_comment_calibration": "This config is the GENERIC default for FPGA dimmer2048 deployments. The brightness_to_nits.sweep_table and thermal_compensation.factor_table point at NEUTRAL tables produced by tools/blend-calibrations.py - arithmetic mean of the per-panel calibrations the project ships (currently 12.3-inch nq1v1 and 15.6-inch 0od). Worst-case error per panel using the neutral tables is ~3-4%, vs ~7-8% if either panel-specific table is used on the wrong panel. For ~1% accuracy, switch to a panel-specific config (config_fpga_opti4001_dimmer2048_12_3_nq1v1.json or _15_6_0od.json) at cmake configure time. Paths are resolved relative to this config file's directory.",
   "_comment_thermal_compensation": "thermal_compensation undoes the 4-8% nits drop that happens once the panel reaches thermal equilibrium (LED + phosphor temp coefficient). Reads the F1KM backlight NTC directly from /dev/i2c-1 slave 0x66 register 0x1002 via I2C_RDWR atomic transactions (kernel serializes against any other client of the same slave). Like the brightness LUT, the factor_table is REFERENCE data swept on one specific unit - re-run tools/thermal-factor.py for production accuracy. The daemon fails soft: if I2C reads fail, the daemon falls back to uncorrected behavior. To use a different temperature source, replace i2c_temp_source with a temp_command shell pipeline (or set both - i2c is preferred per cycle with temp_command as automatic fallback).",
 
   "sensor": {
@@ -77,12 +77,12 @@
 
   "brightness_to_nits": {
     "enabled": true,
-    "sweep_table": "calibrations/dimmer_12_3_nq1v1.csv"
+    "sweep_table": "calibrations/dimmer_neutral.csv"
   },
 
   "thermal_compensation": {
     "enabled": true,
-    "factor_table": "calibrations/dimmer_12_3_nq1v1_thermal_factor.csv",
+    "factor_table": "calibrations/dimmer_neutral_thermal_factor.csv",
     "i2c_temp_source": {
       "device": "/dev/i2c-1",
       "address": "0x66",
