@@ -1,0 +1,95 @@
+{
+  "_comment_panel": "Configuration for the 12.3-inch panel variant 'nq1v1'. Identical hardware bringup as the generic config_fpga_opti4001_dimmer2048.json (FPGA dimmer2048 + OPTI4001 ALS + F1KM backlight NTC); only the panel-specific calibration files differ. Pair this with -DCONFIG_FILE=config_fpga_opti4001_dimmer2048_12_3_nq1v1.json at cmake configure time to make the installed config.json symlink point here.",
+  "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific FPGA dimmer2048 + 12.3-inch nq1v1 panel unit; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/dimmer_12_3_nq1v1.csv. Path is resolved relative to this config file's directory.",
+  "_comment_thermal_compensation": "thermal_compensation undoes the 4-8% nits drop that happens once the panel reaches thermal equilibrium (LED + phosphor temp coefficient). Reads the F1KM backlight NTC directly from /dev/i2c-1 slave 0x66 register 0x1002 via I2C_RDWR atomic transactions (kernel serializes against any other client of the same slave). Like the brightness LUT, the factor_table is REFERENCE data swept on one specific unit - re-run tools/thermal-factor.py for production accuracy. The daemon fails soft: if I2C reads fail, the daemon falls back to uncorrected behavior. To use a different temperature source, replace i2c_temp_source with a temp_command shell pipeline (or set both - i2c is preferred per cycle with temp_command as automatic fallback).",
+
+  "sensor": {
+    "type": "fpga_opti4001",
+    "device": "/dev/i2c-1",
+    "address": "0x1D",
+    "scale_factor": 1.64
+  },
+
+  "output": {
+    "type": "dimmer2048",
+    "device": "/dev/i2c-1",
+    "address": "0x1D"
+  },
+
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/home/pi/als-dimmer/state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": true
+  },
+
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 10],
+      "brightness_range": [15, 30],
+      "curve": "logarithmic",
+      "step_sizes": {"large": 5, "medium": 2, "small": 1},
+      "error_thresholds": {"large": 20, "small": 5}
+    },
+    {
+      "name": "indoor",
+      "lux_range": [10, 500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": {"large": 8, "medium": 3, "small": 1},
+      "error_thresholds": {"large": 25, "small": 8}
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": {"large": 10, "medium": 4, "small": 2},
+      "error_thresholds": {"large": 30, "small": 10}
+    }
+  ],
+
+  "notification": {
+    "enabled": true,
+    "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
+  },
+
+  "calibration": {
+    "enabled": false,
+    "sample_duration_sec": 60,
+    "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/dimmer_12_3_nq1v1.csv"
+  },
+
+  "thermal_compensation": {
+    "enabled": true,
+    "factor_table": "calibrations/dimmer_12_3_nq1v1_thermal_factor.csv",
+    "i2c_temp_source": {
+      "device": "/dev/i2c-1",
+      "address": "0x66",
+      "register": "0x1002",
+      "scale": 0.1
+    },
+    "poll_interval_sec": 30
+  }
+}
