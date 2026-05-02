@@ -303,6 +303,226 @@ without it, the daemon behaves exactly as if the feature didn't exist.
 When the temp command keeps failing, factor falls back to 1.0 so
 brightness-to-nits readings stay sensible even if the temp source breaks.
 
+## Adding or Updating a Display Calibration
+
+This section is the recipe for taking measurements off a Pi target,
+producing the daemon-consumable CSVs, and shipping a config that uses
+them. Written so a fresh session can follow it end-to-end with no
+context other than this file.
+
+### File-trio anatomy (one set per panel variant)
+
+Each panel variant produces **three CSV files** under `calibrations/`,
+sharing a common stem:
+
+| File | What it is | Daemon consumes? | How produced |
+|---|---|---|---|
+| `dimmer_<size>_<variant>.csv` | Brightness % → nits at the LUT's calibration temp | **Yes** (`brightness_to_nits.sweep_table`) | `tools/als-dimmer-sweep.py` running on the Pi against the daemon's TCP/Unix socket, with a colorimeter and `spotread` |
+| `dimmer_<size>_<variant>_temp_nits_relation.csv` | Raw nits-vs-time-vs-temp log at brightness=100% over a full warm-up period | No (input only) | A separate live-measurement script (e.g. `live-measurements-child.py`) that records `Y` (nits), `backlight_temp_c`, and `als_brightness_pct` every 30 s while the panel sits at 100% from cold to thermal equilibrium |
+| `dimmer_<size>_<variant>_thermal_factor.csv` | Multiplicative correction factor vs temperature, normalized so factor(reference_temp_c)=1.0 | **Yes** (`thermal_compensation.factor_table`) | `tools/thermal-factor.py` consuming the raw `temp_nits_relation.csv` |
+
+**Naming**:
+
+- `<size>` — panel diagonal, dots replaced with underscores (`12_3` for 12.3″, `15_6` for 15.6″, `17_3` for 17.3″, …).
+- `<variant>` — panel model code or a measurement-condition tag (e.g. `nq1v1`, `0od`). Use the same `<variant>` token across all three files for one set.
+
+The three files are **independent in storage but coupled in
+semantics**: `thermal_factor`'s `reference_temp_c` should match the
+temperature at which the brightness sweep was taken, otherwise a
+small systematic offset appears in `--absolute-brightness` readings.
+
+### Workflow A — adding a new panel variant from scratch
+
+Triggered when you have a new display you've never measured before.
+Outputs: a 3-file calibration set + a panel-specific config + an
+updated neutral blend (if more than one panel exists).
+
+**Step 1 — collect brightness sweep on the Pi.** Pre-requisites: daemon
+running (so the sweep tool can talk to it), colorimeter plugged in
+and seen by `spotread`, panel cold-ish (run with `--warmup-seconds 5`
+or skip warmup if the panel is already at typical operating temp).
+
+```bash
+als-dimmer-sweep \
+    --output ~/sweeps/dimmer_<size>_<variant>.csv \
+    --label warm \
+    --warmup-seconds 5
+```
+
+The sweep records `backlight_temp_c` per row when `i2c_temp_source`
+is configured (or via `--temp-cmd`); this is what later lets us pick
+the right `--reference-temp` for the thermal factor.
+
+**Step 2 — collect a thermal log on the Pi.** Run your live-measurement
+script for **30–60 minutes** with the panel at brightness=100% from
+cold to steady state. Output should be a CSV with columns at minimum:
+`als_brightness_pct`, `backlight_temp_c`, `Y`. Save as
+`~/sweeps/dimmer_<size>_<variant>_temp_nits_relation.csv`.
+
+**Step 3 — copy both raw files into the repo.**
+
+```bash
+# On dev box, from repo root
+scp pi@raspberrypi:~/sweeps/dimmer_<size>_<variant>.csv \
+                  als-dimmer/calibrations/
+scp pi@raspberrypi:~/sweeps/dimmer_<size>_<variant>_temp_nits_relation.csv \
+                  als-dimmer/calibrations/
+```
+
+**Step 4 — derive the thermal factor table on the host.** Pick a
+reference temperature that matches the brightness sweep's mean
+operating temp, so `factor(sweep_temp) = 1.0` and the brightness LUT
+is exact at the temp it was actually swept at.
+
+```bash
+# Find the sweep's mean temp
+awk -F, '/^[0-9]/ {sum += $4; n++} END {print sum/n}' \
+    als-dimmer/calibrations/dimmer_<size>_<variant>.csv
+# Use that value (rounded to 0.5°C) as --reference-temp:
+als-dimmer/tools/thermal-factor.py \
+    --input  als-dimmer/calibrations/dimmer_<size>_<variant>_temp_nits_relation.csv \
+    --output als-dimmer/calibrations/dimmer_<size>_<variant>_thermal_factor.csv \
+    --reference-temp <sweep mean rounded> \
+    --label dimmer_<size>_<variant>_warm
+```
+
+**Step 5 — re-blend the neutral tables** so the generic config keeps
+covering the new panel:
+
+```bash
+als-dimmer/tools/blend-calibrations.py \
+    --input als-dimmer/calibrations/dimmer_12_3_nq1v1.csv \
+    --input als-dimmer/calibrations/dimmer_15_6_0od.csv \
+    --input als-dimmer/calibrations/dimmer_<size>_<variant>.csv \
+    --output als-dimmer/calibrations/dimmer_neutral.csv \
+    --label neutral
+
+als-dimmer/tools/blend-calibrations.py \
+    --input als-dimmer/calibrations/dimmer_12_3_nq1v1_thermal_factor.csv \
+    --input als-dimmer/calibrations/dimmer_15_6_0od_thermal_factor.csv \
+    --input als-dimmer/calibrations/dimmer_<size>_<variant>_thermal_factor.csv \
+    --output als-dimmer/calibrations/dimmer_neutral_thermal_factor.csv \
+    --target-reference-temp 38.5 \
+    --label neutral
+```
+
+(Update the `--input` list in this README's example block too if you
+want it to stay in sync.)
+
+**Step 6 — create the panel-specific config.** Copy an existing
+panel-specific config and adjust just the calibration paths and the
+`_comment_panel` / `_comment_calibration` strings:
+
+```bash
+cp als-dimmer/configs/config_fpga_opti4001_dimmer2048_15_6_0od.json \
+   als-dimmer/configs/config_fpga_opti4001_dimmer2048_<size>_<variant>.json
+# Then edit the new file: change `15_6_0od` to `<size>_<variant>` in
+# both `_comment_*` blocks and in `brightness_to_nits.sweep_table` +
+# `thermal_compensation.factor_table`. Hardware blocks (sensor,
+# output, control, zones, notification, i2c_temp_source) stay
+# identical because all dimmer2048 panels share the same FPGA board
+# and host hardware.
+```
+
+**Step 7 — verify locally.** From the repo root:
+
+```bash
+cmake -B /tmp/test-build -S als-dimmer -DCMAKE_INSTALL_PREFIX=/tmp/test-install
+cmake --build /tmp/test-build -j
+cmake --install /tmp/test-build
+ls /tmp/test-install/etc/als-dimmer/calibrations/   # all 3 new CSVs visible
+ls /tmp/test-install/etc/als-dimmer/                # new config visible
+python3 -c "import json; \
+    json.load(open('/tmp/test-install/etc/als-dimmer/config_fpga_opti4001_dimmer2048_<size>_<variant>.json'))" \
+    && echo OK
+```
+
+**Step 8 — commit.** Three logical units, separate commits or one
+combined depending on review preference. A representative single
+commit is fine for incremental panels:
+
+```
+git add als-dimmer/calibrations/dimmer_<size>_<variant>*.csv
+git add als-dimmer/calibrations/dimmer_neutral*.csv  # if re-blended
+git add als-dimmer/configs/config_fpga_opti4001_dimmer2048_<size>_<variant>.json
+git commit
+```
+
+### Workflow B — modifying an existing panel's calibration
+
+Triggered when the same panel is being re-measured (refresh, drift
+suspected, better measurement equipment, etc.). The matrix below
+captures what needs regenerating in each scenario:
+
+| What changed | Re-sweep brightness? | Re-collect temp_nits log? | Regenerate factor? | Re-blend neutral? |
+|---|---|---|---|---|
+| Refining the same panel's LUT | yes | no | yes (cheap, just to align reference temp) | yes (LUT contributes to neutral) |
+| Same panel, suspect thermal drift | no | yes | yes | yes (factor contributes to neutral) |
+| Both above | yes | yes | yes | yes |
+| Just want a different reference temp on existing data | no | no | yes | yes |
+| Renaming files (panel re-tag) | no | no | no | no — but `git mv` to preserve history |
+
+Practical "refresh just the LUT" recipe (most common case):
+
+```bash
+# 1. Re-sweep on Pi (same panel)
+als-dimmer-sweep --output ~/sweeps/dimmer_<size>_<variant>.csv ...
+
+# 2. Copy back to repo, replacing the old file
+scp pi@raspberrypi:~/sweeps/dimmer_<size>_<variant>.csv \
+    als-dimmer/calibrations/
+
+# 3. Find new sweep's mean temp
+awk -F, '/^[0-9]/ {sum += $4; n++} END {print sum/n}' \
+    als-dimmer/calibrations/dimmer_<size>_<variant>.csv
+
+# 4. Regenerate the thermal factor with the new reference temp,
+#    re-using the existing temp_nits_relation log:
+als-dimmer/tools/thermal-factor.py \
+    --input  als-dimmer/calibrations/dimmer_<size>_<variant>_temp_nits_relation.csv \
+    --output als-dimmer/calibrations/dimmer_<size>_<variant>_thermal_factor.csv \
+    --reference-temp <new mean>
+
+# 5. Re-blend neutral tables (workflow A step 5)
+# 6. Commit
+```
+
+### Renaming a calibration set
+
+If you want to rename a panel's calibration files (e.g. `dimmer_2048_*` → `dimmer_12_3_nq1v1_*`):
+
+```bash
+git mv calibrations/old_name.csv                    calibrations/new_name.csv
+git mv calibrations/old_name_thermal_factor.csv     calibrations/new_name_thermal_factor.csv
+git mv calibrations/old_name_temp_nits_relation.csv calibrations/new_name_temp_nits_relation.csv
+```
+
+Then update **all references** to the old name:
+- `configs/*.json` — `brightness_to_nits.sweep_table` and `thermal_compensation.factor_table` paths, plus any `_comment_*` examples
+- `README.md` — example paths in the Thermal compensation section
+- `tools/thermal-factor.py` — docstring example
+- `tools/blend-calibrations.py` — docstring example
+
+```bash
+grep -rn '<old_name>' als-dimmer/ \
+    --include='*.json' --include='*.md' \
+    --include='*.py' --include='*.cpp' --include='*.hpp' \
+    | grep -v build/   # find every text reference to update
+```
+
+`git mv` preserves history so blame still points at the original commits.
+
+### Tools reference
+
+| Tool | Where it runs | Inputs | Outputs |
+|---|---|---|---|
+| `tools/als-dimmer-sweep.py` | **Pi target** (talks to live daemon, drives colorimeter) | daemon socket, `spotread` | brightness sweep CSV |
+| `tools/thermal-factor.py` | **Host** (offline data converter) | `*_temp_nits_relation.csv`, optional `--reference-temp` | `*_thermal_factor.csv` |
+| `tools/blend-calibrations.py` | **Host** (offline data converter) | 2+ brightness LUTs *or* 2+ thermal factor tables | blended neutral CSV |
+| Live-measurement logger (your separate script) | **Pi target** (talks to daemon to lock brightness, drives colorimeter) | daemon socket, `spotread`, optional temperature source | `*_temp_nits_relation.csv` |
+
+`als-dimmer-sweep.py` is installed to `bin/` on the Pi by `cmake --install`. The two host-side tools are deliberately **not** installed on the target — they don't need to be there for the daemon to run.
+
 ## Troubleshooting
 
 ### I2C Permission Denied
