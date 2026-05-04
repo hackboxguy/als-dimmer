@@ -1,4 +1,8 @@
 {
+  "_comment_panel": "Configuration for the 15.6-inch panel variant 'rtk_hg560t34' driven over HDMI via DDC/CI (no FPGA dimmer in the chain). Identical sensor + control bringup as config_opti4001_ddcutil.json; this variant pins the panel-specific brightness LUT and explicitly disables thermal_compensation (the panel has no built-in backlight temperature sensor). Pair with -DCONFIG_FILE=config_opti4001_ddcutil_rtk_hg560t34.json at cmake configure time to make the installed config.json symlink point here.",
+  "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on one specific 15.6-inch rtk_hg560t34 unit; per-unit variation 5-15% is normal. For accurate nits readout on your panel, run tools/als-dimmer-sweep.py and replace calibrations/dimmer_15_6_rtk_hg560t34.csv. Path is resolved relative to this config file's directory.",
+  "_comment_thermal_compensation": "thermal_compensation is disabled because this display has no accessible backlight temperature sensor. The block is kept (rather than omitted) so future operators see the option without grepping the codebase. To enable it later, attach an external temperature source (e.g. an I2C NTC, sysfs hwmon node, or a CAN frame) and configure either i2c_temp_source or temp_command, then flip enabled to true and add tools/thermal-factor.py output as factor_table.",
+
   "sensor": {
     "type": "opti4001",
     "device": "/dev/i2c-1",
@@ -82,5 +86,14 @@
     "enabled": false,
     "sample_duration_sec": 60,
     "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/dimmer_15_6_rtk_hg560t34.csv"
+  },
+
+  "thermal_compensation": {
+    "enabled": false
   }
 }
