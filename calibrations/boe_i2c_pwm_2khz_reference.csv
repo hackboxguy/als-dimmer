@@ -10,7 +10,9 @@
 # === comparison vs boe_pwm_2khz_reference.csv (Pi GPIO/PWM path) ===
 # At brightness >=25% the two paths are functionally identical (mean
 # delta ~0%, range +/-0.6% - within colorimeter noise + thermal drift).
-# Frequency difference (1953 Hz here vs 2000 Hz reference) is invisible.
+# Both paths run at ~2 kHz (i2c_pwm: ATtiny85 Timer1 from the ~66 MHz PLL
+# / 128 / 256 ~= 2014 Hz, tracking OSCCAL calibration; reference: Pi GPIO
+# PWM at 2000 Hz). Frequency match is well within visual indistinguishability.
 # Below 10% the i2c_pwm path reads consistently HIGHER nits: +5% at 10%,
 # ~+56% relative (+7 nits absolute) at 1%. Root cause is the ATtiny85's
 # 8-bit duty resolution: brightness=1% rounds to native byte 3
