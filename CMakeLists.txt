@@ -79,11 +79,19 @@ target_compile_options(als-dimmer-client PRIVATE
     -Wall -Wextra -Wpedantic -Werror
 )
 
-# Configure systemd service file with CMAKE_INSTALL_PREFIX
+# Configure systemd service files with CMAKE_INSTALL_PREFIX. The -pwm unit is
+# the secondary instance for the dual-display compare rig (config_opti4001_
+# boe_i2c_pwm_secondary.json). It's installed but not enabled by default; the
+# external compare app activates it on demand via systemctl start.
 if(INSTALL_SYSTEMD_SERVICE)
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/systemd/als-dimmer.service.in
         ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer.service
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/systemd/als-dimmer-pwm.service.in
+        ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer-pwm.service
         @ONLY
     )
 endif()
@@ -121,9 +129,12 @@ install(CODE "
     message(STATUS \"Created symlink: config.json -> ${CONFIG_FILE}\")
 ")
 
-# Install systemd service if enabled
+# Install systemd services if enabled. Both the primary and the optional
+# secondary (-pwm) unit ship together; activation is up to the operator.
 if(INSTALL_SYSTEMD_SERVICE)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer.service
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer.service
+        ${CMAKE_CURRENT_BINARY_DIR}/als-dimmer-pwm.service
         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system)
-    message(STATUS "Systemd service will be installed to ${CMAKE_INSTALL_PREFIX}/lib/systemd/system")
+    message(STATUS "Systemd services will be installed to ${CMAKE_INSTALL_PREFIX}/lib/systemd/system")
 endif()

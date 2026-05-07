@@ -90,6 +90,12 @@ std::unique_ptr<als_dimmer::SensorInterface> createSensor(const als_dimmer::Conf
             config.sensor.device,
             config.sensor.scale_factor
         );
+    } else if (config.sensor.type == "null") {
+        // Explicit "no sensor". Returning nullptr routes through the
+        // existing init-failure fallback in main(): NullSensor is installed,
+        // sensor_available stays false, and MANUAL mode is forced. This
+        // keeps a single canonical "no sensor" code path.
+        return nullptr;
     }
     LOG_ERROR("factory", "Unsupported sensor type: " << config.sensor.type);
     return nullptr;
@@ -613,7 +619,11 @@ int main(int argc, char* argv[]) {
         sensor_available = true;
         LOG_INFO("main", "Sensor initialized: " << sensor->getType());
     } else {
-        LOG_WARN("main", "Sensor init failed; running in MANUAL-only mode (slider control)");
+        if (config.sensor.type == "null") {
+            LOG_INFO("main", "sensor.type=null; running in MANUAL-only mode (external control via socket)");
+        } else {
+            LOG_WARN("main", "Sensor init failed; running in MANUAL-only mode (slider control)");
+        }
         sensor = std::make_unique<als_dimmer::NullSensor>();
         sensor->init();  // no-op, but keeps interface contract clean
         // Force MANUAL mode and ensure manual_brightness is sane.

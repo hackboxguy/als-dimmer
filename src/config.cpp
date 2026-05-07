@@ -427,6 +427,9 @@ void Config::validate() const {
         if (sensor.device.empty()) {
             throw ConfigError("sensor.device is required for fpga_opti4001_sysfs sensor type");
         }
+    } else if (sensor.type == "null") {
+        // Explicit "no sensor" — daemon boots straight into MANUAL mode via
+        // the standard sensor-init-failure fallback path. No sub-fields required.
     } else {
         throw ConfigError("Unknown sensor type: " + sensor.type);
     }

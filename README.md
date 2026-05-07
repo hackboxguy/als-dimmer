@@ -240,6 +240,62 @@ display stays controllable from the slider. `get_status` reports
 `"sensor_status": "unavailable"` in this state and `set_mode auto` is rejected
 with `SENSOR_UNAVAILABLE` until the daemon is restarted with a working sensor.
 
+### Explicit "no sensor" — `sensor.type: "null"`
+
+Configs that intentionally have no ALS (e.g. the secondary instance in
+dual-display compare mode, see below) set `sensor.type` to `"null"`. The daemon
+skips sensor init entirely and goes straight into MANUAL mode via the same
+fallback path described above. There are no required sub-fields under `sensor`
+in this case. AUTO mode is never reachable on such an instance — the daemon
+exists purely to be driven over the socket API.
+
+## Dual-instance compare mode
+
+For side-by-side comparison of two displays driven from the same Pi (e.g. a
+local-dimming panel and a BOE edge-lit panel through an HDMI splitter), a
+second als-dimmer instance can run alongside the primary. The secondary
+instance:
+
+- Has **no ambient light sensor of its own** (`sensor.type: "null"`) — the
+  primary owns the OPT4001. Each display's brightness is set independently by
+  an external compare app that knows both panels' calibrated nits curves.
+- Listens on a **separate TCP port and unix socket** (`9001` and
+  `/tmp/als-dimmer-pwm.sock` in the shipped config) and uses a separate state
+  file (`/tmp/als-dimmer-pwm-state.json`).
+- Has **streamdeck notifications disabled** — the streamdeck UI is wired to
+  the primary instance only; in dual-display mode the external compare app is
+  authoritative.
+
+The shipped pair is `config_opti4001_boe_i2c_pwm.json` (single-mode primary
+for the BOE panel) plus `config_opti4001_boe_i2c_pwm_secondary.json` and the
+`als-dimmer-pwm.service` unit (secondary, dual-mode). Both unit files install
+unconditionally when `INSTALL_SYSTEMD_SERVICE=ON`; only the primary is enabled
+by default.
+
+**Activation flow** (typically driven from the external compare app):
+
+```sh
+# Start the secondary
+sudo systemctl start als-dimmer-pwm.service
+
+# External app then commands both daemons:
+#   - set_mode "manual" on each (so neither auto-resumes)
+#   - set_absolute_brightness <nits> on each (calibrated per display)
+
+# When done comparing
+sudo systemctl stop als-dimmer-pwm.service
+```
+
+The secondary boots straight into MANUAL with `fallback_brightness` until the
+external app's first `set_brightness` / `set_absolute_brightness` call. If the
+app crashes mid-session, the secondary keeps holding the last commanded value
+— `systemctl stop` cleans up.
+
+**One caveat:** mode changes made via the streamdeck (or any tool talking only
+to the primary's socket on `9000` / `/tmp/als-dimmer.sock`) won't propagate to
+the secondary. In dual-display compare mode, drive everything from the
+external app, not from the streamdeck.
+
 ## Configuration
 
 See `configs/` directory for sample configurations:

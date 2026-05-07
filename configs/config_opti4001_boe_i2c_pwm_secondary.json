@@ -1,0 +1,89 @@
+{
+  "_comment_purpose": "Secondary als-dimmer instance for the dual-display compare rig: a Pi4 driving two 12.3\" displays through an HDMI splitter, where one panel uses local-dimming (controlled by the primary als-dimmer instance, e.g. config_fpga_opti4001_dimmer2048_12_3_nq1v1.json on the default ports/sockets) and the other is a BOE edge-lit panel driven via the i2c-tiny-usb-pwm dongle. The primary owns the ALS sensor and runs normally; this secondary instance has NO sensor of its own (sensor.type=null) and boots straight into MANUAL mode. The external compare app starts this secondary on demand (systemctl start als-dimmer-pwm.service), commands absolute-brightness in nits on both daemons via their socket APIs to equalize the two displays, then stops it (systemctl stop) when compare mode is exited. Reuses the boe_i2c_pwm output stack and its calibration LUT verbatim — only the control plane differs from config_opti4001_boe_i2c_pwm.json.",
+  "_comment_diffs_vs_single_mode": "Differences vs config_opti4001_boe_i2c_pwm.json: (1) sensor.type=null instead of opti4001 - the BOE edge-lit panel doesn't get its own ALS, the external app handles synchronization; (2) tcp_socket.listen_port=9001 and unix_socket.path=/tmp/als-dimmer-pwm.sock to avoid colliding with the primary instance on 9000 / /tmp/als-dimmer.sock; (3) state_file=/tmp/als-dimmer-pwm-state.json for the same reason; (4) notification.enabled=false because the streamdeck UI is wired to the primary instance only - dual-display compare is driven from the external app. Output, brightness_to_nits, zones, thermal_compensation are identical to the single-mode i2c_pwm config.",
+
+  "sensor": {
+    "type": "null"
+  },
+
+  "output": {
+    "type": "i2c_pwm",
+    "device": "/dev/i2c-22",
+    "address": "0x77",
+    "value_range": [0, 255],
+    "duty_register": "0x00",
+    "enable_register": "0x01",
+    "enable_value": 1,
+    "skip_pwm_enable": false,
+    "skip_chip_config": false
+  },
+
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9001
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer-pwm.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/tmp/als-dimmer-pwm-state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": false
+  },
+
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 10],
+      "brightness_range": [5, 30],
+      "curve": "logarithmic",
+      "step_sizes": {"large": 5, "medium": 2, "small": 1},
+      "error_thresholds": {"large": 20, "small": 5}
+    },
+    {
+      "name": "indoor",
+      "lux_range": [10, 500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": {"large": 8, "medium": 3, "small": 1},
+      "error_thresholds": {"large": 25, "small": 8}
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": {"large": 10, "medium": 4, "small": 2},
+      "error_thresholds": {"large": 30, "small": 10}
+    }
+  ],
+
+  "notification": {
+    "enabled": false,
+    "on_change_script": ""
+  },
+
+  "calibration": {
+    "enabled": false,
+    "sample_duration_sec": 60,
+    "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/boe_i2c_pwm_2khz_reference.csv"
+  },
+
+  "thermal_compensation": {
+    "enabled": false
+  }
+}

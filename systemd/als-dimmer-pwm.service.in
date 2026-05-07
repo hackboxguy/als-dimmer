@@ -1,0 +1,28 @@
+[Unit]
+Description=ALS-Dimmer (secondary, BOE i2c-tiny-usb-pwm) — dual-display compare mode
+Documentation=https://github.com/hackboxguy/als-dimmer.git
+After=network.target multi-user.target
+Wants=network.target
+# Independent of the primary als-dimmer.service: the secondary doesn't talk
+# to the primary at runtime. Started/stopped on demand by the external compare
+# app (systemctl start/stop als-dimmer-pwm.service).
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_PREFIX@/bin/als-dimmer --config @CMAKE_INSTALL_PREFIX@/etc/als-dimmer/config_opti4001_boe_i2c_pwm_secondary.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Run as root for I2C device access (the i2c-tiny-usb-pwm dongle on /dev/i2c-22)
+User=root
+
+# Resource limits — match the primary unit
+LimitNOFILE=1024
+MemoryMax=50M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target
