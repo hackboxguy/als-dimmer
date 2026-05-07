@@ -1,6 +1,6 @@
 {
   "_comment_panel": "BOE display backlight where dimming PWM comes from an i2c-tiny-usb-pwm Digispark dongle (not the Pi's GPIO+PWM hardware as in config_opti4001_boepwm.json). The dongle exposes a virtual I2C slave at 0x77 on the bus it offers (typically /dev/i2c-22 after USB enumeration); writing register 0x00 = 0..255 sets the duty cycle of its PB1 PWM output, which feeds the MPQ3367 LED driver's DIM input. The MPQ3367 itself is on the same bus at 0x38 - the daemon configures both at init. Pair with -DCONFIG_FILE=config_opti4001_boe_i2c_pwm.json at cmake configure time.",
-  "_comment_calibration": "brightness_to_nits.sweep_table reuses the BOE PWM 2 kHz reference table from the Pi-driven boe_pwm setup. The brightness curve depends on the panel + MPQ3367 (which are unchanged), so this is a reasonable approximation despite the slightly different PWM frequency (1953 Hz here vs 2 kHz in the reference) and duty resolution (0..255 here vs ns-precision in the reference). Re-sweep with tools/als-dimmer-sweep.py for accuracy on your specific panel.",
+  "_comment_calibration": "brightness_to_nits.sweep_table is the i2c_pwm-specific reference, swept on the same BOE panel + MPQ3367 used for the Pi-PWM path but driven via the i2c-tiny-usb-pwm dongle. NOT interchangeable with calibrations/boe_pwm_2khz_reference.csv - the two diverge by 5..50% in the 0..10% brightness range due to the ATtiny85's 8-bit duty resolution (rounding errors get amplified by the panel's highly non-linear near-zero response). Above 25% the two are within colorimeter noise. See the CSV header comment block for the full comparison breakdown. Per-unit variation 5-15% is normal; for accuracy on YOUR panel, run tools/als-dimmer-sweep.py and replace the CSV.",
   "_comment_thermal_compensation": "Disabled because there's no temperature sensor accessible to the daemon on this hardware path (MPQ3367 has no temperature output, the i2c-tiny-usb-pwm dongle only exposes the PWM control register). If you wire an external NTC or hwmon source later, configure i2c_temp_source or temp_command and flip enabled to true.",
 
   "sensor": {
@@ -83,7 +83,7 @@
 
   "brightness_to_nits": {
     "enabled": true,
-    "sweep_table": "calibrations/boe_pwm_2khz_reference.csv"
+    "sweep_table": "calibrations/boe_i2c_pwm_2khz_reference.csv"
   },
 
   "thermal_compensation": {
