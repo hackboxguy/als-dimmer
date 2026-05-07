@@ -109,6 +109,21 @@ Config Config::loadFromFile(const std::string& filename) {
         config.output.skip_chip_config = output_json["skip_chip_config"].get<bool>();
     }
 
+    // i2c_pwm-specific fields (all optional with sane defaults for the
+    // i2c-tiny-usb-pwm Digispark dongle).
+    if (output_json.contains("duty_register")) {
+        config.output.i2c_pwm_duty_register = output_json["duty_register"].get<std::string>();
+    }
+    if (output_json.contains("enable_register")) {
+        config.output.i2c_pwm_enable_register = output_json["enable_register"].get<std::string>();
+    }
+    if (output_json.contains("enable_value")) {
+        config.output.i2c_pwm_enable_value = output_json["enable_value"].get<int>();
+    }
+    if (output_json.contains("skip_pwm_enable")) {
+        config.output.i2c_pwm_skip_enable = output_json["skip_pwm_enable"].get<bool>();
+    }
+
     // Parse control configuration (with defaults)
     if (j.contains("control")) {
         auto& control_json = j["control"];
@@ -459,6 +474,22 @@ void Config::validate() const {
         }
         if (output.value_range.size() != 2 || output.value_range[1] <= 0) {
             throw ConfigError("output.value_range must be [min, max] with max > 0 for fpga_sysfs_dimmer output type");
+        }
+    } else if (output.type == "i2c_pwm") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for i2c_pwm output type (I2C bus, e.g. /dev/i2c-22)");
+        }
+        if (output.address.empty()) {
+            throw ConfigError("output.address is required for i2c_pwm output type (PWM slave address, e.g. 0x77)");
+        }
+        if (output.value_range.size() != 2 || output.value_range[1] <= 0) {
+            throw ConfigError("output.value_range must be [min, max] with max > 0 for i2c_pwm output type (typically [0, 255] for 8-bit duty)");
+        }
+        if (output.i2c_pwm_duty_register.empty()) {
+            throw ConfigError("output.duty_register cannot be empty for i2c_pwm output type");
+        }
+        if (output.i2c_pwm_enable_value < 0 || output.i2c_pwm_enable_value > 255) {
+            throw ConfigError("output.enable_value must be 0..255 for i2c_pwm output type");
         }
     } else if (output.type == "can") {
         // CAN output validation (Phase 3)

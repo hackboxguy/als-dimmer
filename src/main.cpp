@@ -58,6 +58,14 @@ std::unique_ptr<OutputInterface> createBoePwmOutput(const std::string& i2c_devic
                                                      int period_ns,
                                                      const std::string& response_curve_path,
                                                      bool skip_chip_config);
+std::unique_ptr<OutputInterface> createI2CPwmOutput(const std::string& device,
+                                                     uint8_t address,
+                                                     uint8_t duty_register,
+                                                     uint8_t enable_register,
+                                                     uint8_t enable_value,
+                                                     bool skip_pwm_enable,
+                                                     int max_value,
+                                                     bool skip_chip_config);
 
 } // namespace als_dimmer
 
@@ -118,6 +126,30 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
             config.output.pwm_alt_func,
             config.output.period_ns,
             config.output.response_curve,
+            config.output.skip_chip_config
+        );
+    }
+    else if (config.output.type == "i2c_pwm") {
+        // Parse hex strings; let std::stoul throw if malformed (caught by
+        // the daemon's top-level error handling).
+        uint8_t address = static_cast<uint8_t>(
+            std::stoul(config.output.address, nullptr, 16));
+        uint8_t duty_reg = static_cast<uint8_t>(
+            std::stoul(config.output.i2c_pwm_duty_register, nullptr, 16));
+        uint8_t enable_reg = static_cast<uint8_t>(
+            std::stoul(config.output.i2c_pwm_enable_register, nullptr, 16));
+        int max_value = (config.output.value_range.size() == 2 &&
+                         config.output.value_range[1] > 0)
+                        ? config.output.value_range[1]
+                        : 255;
+        return als_dimmer::createI2CPwmOutput(
+            config.output.device,
+            address,
+            duty_reg,
+            enable_reg,
+            static_cast<uint8_t>(config.output.i2c_pwm_enable_value),
+            config.output.i2c_pwm_skip_enable,
+            max_value,
             config.output.skip_chip_config
         );
     }

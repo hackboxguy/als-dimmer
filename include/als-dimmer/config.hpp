@@ -43,6 +43,15 @@ struct OutputConfig {
     int period_ns = 500000;             // 2 kHz default
     std::string response_curve;         // Optional CSV path (empty = direct duty mapping)
     bool skip_chip_config = false;      // True if MPQ3367 is already initialized externally
+
+    // i2c_pwm-specific fields (i2c-tiny-usb-pwm or similar I2C-to-PWM device)
+    // The primary slave is `address` above (e.g. 0x77 for i2c-tiny-usb-pwm).
+    // These are hex strings parsed at init time. value_range[1] is the
+    // max native duty value (e.g. 255 for 8-bit).
+    std::string i2c_pwm_duty_register   = "0x00";   // typically reg 0x00 = duty
+    std::string i2c_pwm_enable_register = "0x01";   // typically reg 0x01 = enable
+    int i2c_pwm_enable_value            = 1;
+    bool i2c_pwm_skip_enable            = false;    // when true, don't write enable on init
 };
 
 struct StepSizes {
