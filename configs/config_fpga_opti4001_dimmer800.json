@@ -70,5 +70,10 @@
     "enabled": false,
     "sample_duration_sec": 60,
     "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/dimmer800.csv"
   }
 }
