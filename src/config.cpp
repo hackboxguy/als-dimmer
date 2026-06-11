@@ -377,6 +377,19 @@ Config Config::loadFromFile(const std::string& filename) {
         }
     }
 
+    // Parse white_point_calibration configuration (optional). Existing
+    // deployments get the default file path used by disp-tester's white-point
+    // matching flow; a missing file is handled at runtime as "nothing to do".
+    if (j.contains("white_point_calibration")) {
+        auto& wp_json = j["white_point_calibration"];
+        if (wp_json.contains("enabled")) {
+            config.white_point_calibration.enabled = wp_json["enabled"].get<bool>();
+        }
+        if (wp_json.contains("file_path")) {
+            config.white_point_calibration.file_path = wp_json["file_path"].get<std::string>();
+        }
+    }
+
     // Parse calibration configuration (optional)
     if (j.contains("calibration")) {
         auto& calib_json = j["calibration"];
@@ -535,6 +548,10 @@ void Config::validate() const {
     }
     if (control.hysteresis_percent < 0.0f || control.hysteresis_percent > 50.0f) {
         throw ConfigError("control.hysteresis_percent must be between 0 and 50");
+    }
+    if (white_point_calibration.enabled &&
+        white_point_calibration.file_path.empty()) {
+        throw ConfigError("white_point_calibration.file_path cannot be empty when enabled");
     }
 
     // Validate socket configuration

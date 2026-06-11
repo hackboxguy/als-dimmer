@@ -42,8 +42,13 @@ public:
     bool setBrightness(int brightness) override;
     int getCurrentBrightness() override;
     std::string getType() const override;
+    bool setWhitePoint(int wpx, int wpy, int wpz) override;
 
 private:
+    static constexpr uint8_t REG_WP_X = 0x37;
+    static constexpr uint8_t REG_WP_Y = 0x39;
+    static constexpr uint8_t REG_WP_Z = 0x3B;
+
     std::string device_;
     uint8_t address_;
     DimmerType type_;
@@ -59,6 +64,15 @@ private:
      * @return true on success
      */
     bool writeI2CBrightness(int native_value);
+
+    /**
+     * Write one FPGA white-point register as a 16-bit big-endian value.
+     *
+     * @param reg FPGA register offset (0x37, 0x39, or 0x3B)
+     * @param value White-point value in [0, 256]
+     * @return true on success
+     */
+    bool writeWhitePointRegister(uint8_t reg, int value);
 
     /**
      * Scale percentage (0-100) to native brightness value

@@ -68,6 +68,19 @@ public:
      * @return output type string
      */
     virtual std::string getType() const = 0;
+
+    /**
+     * Restore FPGA white-point registers when the output supports them.
+     *
+     * The default implementation is intentionally unsupported so non-FPGA
+     * outputs keep their existing behavior.
+     */
+    virtual bool setWhitePoint(int wpx, int wpy, int wpz) {
+        (void)wpx;
+        (void)wpy;
+        (void)wpz;
+        return false;
+    }
 };
 
 } // namespace als_dimmer

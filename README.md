@@ -328,6 +328,30 @@ variation of 5–15% is normal; for accurate readings on your panel, run
 `tools/als-dimmer-sweep.py` (drives the daemon's `set_brightness` and a
 colorimeter through `spotread`) and replace the file.
 
+### White-point calibration restore
+
+On startup, FPGA dimmer outputs check for the white-point JSON produced by the
+disp-tester white-point matching flow:
+
+```text
+/home/pi/als-dimmer/etc/als-dimmer/calibrations/white-point-calibration.json
+```
+
+If the file exists and contains top-level integer `wpx`, `wpy`, and `wpz`
+values in the FPGA-supported `0..256` range, the daemon writes them to the FPGA
+white-point registers once during startup. If the file is missing, malformed,
+or the active output does not support FPGA white-point registers, the daemon
+logs the reason and continues without changing the registers.
+
+The default path can be changed or disabled with:
+
+```json
+"white_point_calibration": {
+  "enabled": true,
+  "file_path": "/home/pi/als-dimmer/etc/als-dimmer/calibrations/white-point-calibration.json"
+}
+```
+
 ### Thermal compensation (optional)
 
 The brightness-to-nits LUT captures the panel's response at the temperature
@@ -646,4 +670,3 @@ sudo journalctl -u als-dimmer.service -n 50 --no-pager
 
 - [CLAUDE.md](docs/CLAUDE.md) - Complete design specification
 - [PROGRESS.md](docs/PROGRESS.md) - Development progress and testing notes
-

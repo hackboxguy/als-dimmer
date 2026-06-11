@@ -169,6 +169,55 @@ bool I2CDimmerOutput::writeI2CBrightness(int native_value) {
     return true;
 }
 
+bool I2CDimmerOutput::setWhitePoint(int wpx, int wpy, int wpz) {
+    if (!writeWhitePointRegister(REG_WP_X, wpx)) {
+        return false;
+    }
+    if (!writeWhitePointRegister(REG_WP_Y, wpy)) {
+        return false;
+    }
+    if (!writeWhitePointRegister(REG_WP_Z, wpz)) {
+        return false;
+    }
+
+    std::cout << "[I2CDimmer]  Applied white-point calibration: "
+              << "wpx=" << wpx << " wpy=" << wpy << " wpz=" << wpz << "\n";
+    return true;
+}
+
+bool I2CDimmerOutput::writeWhitePointRegister(uint8_t reg, int value) {
+    if (fd_ < 0) {
+        std::cerr << "[I2CDimmer]  I2C device not initialized\n";
+        return false;
+    }
+    if (value < 0 || value > 256) {
+        std::cerr << "[I2CDimmer]  Invalid white-point value " << value
+                  << " for register 0x" << std::hex << static_cast<int>(reg)
+                  << std::dec << " (expected 0-256)\n";
+        return false;
+    }
+
+    uint8_t buffer[6] = {
+        0x00,
+        0x00,
+        0x00,
+        reg,
+        static_cast<uint8_t>((value >> 8) & 0xFF),
+        static_cast<uint8_t>(value & 0xFF)
+    };
+
+    ssize_t result = write(fd_, buffer, sizeof(buffer));
+    if (result != static_cast<ssize_t>(sizeof(buffer))) {
+        std::cerr << "[I2CDimmer]  White-point I2C write failed for register 0x"
+                  << std::hex << static_cast<int>(reg) << std::dec
+                  << " (wrote " << result << " of " << sizeof(buffer)
+                  << " bytes): " << strerror(errno) << "\n";
+        return false;
+    }
+
+    return true;
+}
+
 int I2CDimmerOutput::scaleToNative(int percent) const {
     // Scale 0-100% to native range (0-200, 0-800, or 0-2048)
     return static_cast<int>((percent / 100.0) * max_native_brightness_);

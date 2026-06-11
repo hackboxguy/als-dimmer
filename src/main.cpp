@@ -14,6 +14,7 @@
 #include "als-dimmer/thermal_compensation.hpp"
 #include "json.hpp"
 #include <iostream>
+#include <fstream>
 #include <memory>
 #include <thread>
 #include <chrono>
@@ -21,6 +22,8 @@
 #include <unistd.h>
 #include <csignal>
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 
 using json = nlohmann::json;
 
@@ -31,6 +34,127 @@ static void signalHandler(int signum) {
     (void)signum;
     g_shutdown_requested.store(true);
 }
+
+namespace {
+
+struct WhitePointCalibration {
+    int wpx = 256;
+    int wpy = 256;
+    int wpz = 256;
+    std::string status;
+    std::string schema;
+};
+
+bool parseWhitePointValue(const json& data,
+                          const char* key,
+                          int& value,
+                          std::string& error) {
+    if (!data.contains(key)) {
+        error = std::string("missing field: ") + key;
+        return false;
+    }
+
+    const json& item = data[key];
+    if (!item.is_number_integer() && !item.is_number_unsigned()) {
+        error = std::string("field is not an integer: ") + key;
+        return false;
+    }
+
+    value = item.get<int>();
+    if (value < 0 || value > 256) {
+        error = std::string("field out of range 0..256: ") + key;
+        return false;
+    }
+
+    return true;
+}
+
+bool loadWhitePointCalibration(const std::string& path,
+                               WhitePointCalibration& calibration) {
+    if (path.empty()) {
+        LOG_WARN("main", "White-point calibration path is empty; skipping restore");
+        return false;
+    }
+
+    if (access(path.c_str(), F_OK) != 0) {
+        if (errno == ENOENT) {
+            LOG_INFO("main", "No white-point calibration file at " << path
+                     << "; skipping FPGA white-point restore");
+        } else {
+            LOG_WARN("main", "Cannot access white-point calibration file "
+                     << path << ": " << strerror(errno));
+        }
+        return false;
+    }
+
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        LOG_WARN("main", "Failed to open white-point calibration file "
+                 << path << ": " << strerror(errno));
+        return false;
+    }
+
+    json data;
+    try {
+        file >> data;
+    } catch (const json::parse_error& e) {
+        LOG_WARN("main", "White-point calibration JSON parse error in "
+                 << path << ": " << e.what());
+        return false;
+    }
+
+    if (!data.is_object()) {
+        LOG_WARN("main", "White-point calibration JSON must be an object: "
+                 << path);
+        return false;
+    }
+
+    std::string error;
+    if (!parseWhitePointValue(data, "wpx", calibration.wpx, error) ||
+        !parseWhitePointValue(data, "wpy", calibration.wpy, error) ||
+        !parseWhitePointValue(data, "wpz", calibration.wpz, error)) {
+        LOG_WARN("main", "Ignoring white-point calibration " << path
+                 << ": " << error);
+        return false;
+    }
+
+    if (data.contains("status") && data["status"].is_string()) {
+        calibration.status = data["status"].get<std::string>();
+    }
+    if (data.contains("schema") && data["schema"].is_string()) {
+        calibration.schema = data["schema"].get<std::string>();
+    }
+
+    return true;
+}
+
+void restoreWhitePointCalibration(als_dimmer::OutputInterface& output,
+                                  const als_dimmer::WhitePointCalibrationConfig& config) {
+    if (!config.enabled) {
+        LOG_INFO("main", "White-point calibration restore disabled");
+        return;
+    }
+
+    WhitePointCalibration calibration;
+    if (!loadWhitePointCalibration(config.file_path, calibration)) {
+        return;
+    }
+
+    if (output.setWhitePoint(calibration.wpx, calibration.wpy, calibration.wpz)) {
+        LOG_INFO("main", "Restored FPGA white point from " << config.file_path
+                 << " (wpx=" << calibration.wpx
+                 << " wpy=" << calibration.wpy
+                 << " wpz=" << calibration.wpz
+                 << (calibration.status.empty() ? "" : " status=")
+                 << calibration.status << ")");
+    } else {
+        LOG_WARN("main", "White-point calibration file exists at "
+                 << config.file_path << " but output type '" << output.getType()
+                 << "' did not apply it");
+    }
+}
+
+} // namespace
 
 namespace als_dimmer {
 
@@ -640,6 +764,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     LOG_INFO("main", "Output initialized: " << output->getType());
+    restoreWhitePointCalibration(*output, config.white_point_calibration);
 
     // Load brightness->nits calibration table (optional). Daemon runs identically
     // when this is absent or fails to load - just without absolute-brightness API.

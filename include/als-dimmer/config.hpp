@@ -163,6 +163,12 @@ struct ThermalCompensationConfig {
     int poll_interval_sec = 30;        // How often to read the temperature
 };
 
+struct WhitePointCalibrationConfig {
+    bool enabled = true;
+    std::string file_path =
+        "/home/pi/als-dimmer/etc/als-dimmer/calibrations/white-point-calibration.json";
+};
+
 struct Config {
     SensorConfig sensor;
     OutputConfig output;
@@ -172,6 +178,7 @@ struct Config {
     CalibrationConfig calibration;
     BrightnessToNitsConfig brightness_to_nits;
     ThermalCompensationConfig thermal_compensation;
+    WhitePointCalibrationConfig white_point_calibration;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);
