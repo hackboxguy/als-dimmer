@@ -334,7 +334,7 @@ On startup, FPGA dimmer outputs check for the white-point JSON produced by the
 disp-tester white-point matching flow:
 
 ```text
-/home/pi/als-dimmer/etc/als-dimmer/calibrations/white-point-calibration.json
+/home/pi/system-settings/white-point-calibration.json
 ```
 
 If the file exists and contains top-level integer `wpx`, `wpy`, and `wpz`
@@ -348,7 +348,7 @@ The default path can be changed or disabled with:
 ```json
 "white_point_calibration": {
   "enabled": true,
-  "file_path": "/home/pi/als-dimmer/etc/als-dimmer/calibrations/white-point-calibration.json"
+  "file_path": "/home/pi/system-settings/white-point-calibration.json"
 }
 ```
 

@@ -165,8 +165,7 @@ struct ThermalCompensationConfig {
 
 struct WhitePointCalibrationConfig {
     bool enabled = true;
-    std::string file_path =
-        "/home/pi/als-dimmer/etc/als-dimmer/calibrations/white-point-calibration.json";
+    std::string file_path = "/home/pi/system-settings/white-point-calibration.json";
 };
 
 struct Config {
