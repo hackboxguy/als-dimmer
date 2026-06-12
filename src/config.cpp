@@ -390,6 +390,38 @@ Config Config::loadFromFile(const std::string& filename) {
         if (wp_json.contains("file_path")) {
             config.white_point_calibration.file_path = wp_json["file_path"].get<std::string>();
         }
+
+        // Optional wp_adjust (pixelpipe FPGA) restore block - default
+        // disabled; accepts integers or hex strings for address/page.
+        if (wp_json.contains("wp_adjust")) {
+            auto& wpa_json = wp_json["wp_adjust"];
+            auto& wpa = config.white_point_calibration.wp_adjust;
+            auto parse_int_auto = [](const json& item) -> int {
+                if (item.is_string()) {
+                    return static_cast<int>(
+                        std::stol(item.get<std::string>(), nullptr, 0));
+                }
+                return item.get<int>();
+            };
+            if (wpa_json.contains("enabled")) {
+                wpa.enabled = wpa_json["enabled"].get<bool>();
+            }
+            if (wpa_json.contains("file_path")) {
+                wpa.file_path = wpa_json["file_path"].get<std::string>();
+            }
+            if (wpa_json.contains("i2c_device")) {
+                wpa.i2c_device = wpa_json["i2c_device"].get<std::string>();
+            }
+            if (wpa_json.contains("i2c_address")) {
+                wpa.i2c_address = parse_int_auto(wpa_json["i2c_address"]);
+            }
+            if (wpa_json.contains("page")) {
+                wpa.page = parse_int_auto(wpa_json["page"]);
+            }
+            if (wpa_json.contains("commit_timeout_ms")) {
+                wpa.commit_timeout_ms = wpa_json["commit_timeout_ms"].get<int>();
+            }
+        }
     }
 
     // Parse calibration configuration (optional)
@@ -558,6 +590,25 @@ void Config::validate() const {
     if (white_point_calibration.enabled &&
         white_point_calibration.file_path.empty()) {
         throw ConfigError("white_point_calibration.file_path cannot be empty when enabled");
+    }
+    if (white_point_calibration.wp_adjust.enabled) {
+        const auto& wpa = white_point_calibration.wp_adjust;
+        if (wpa.file_path.empty()) {
+            throw ConfigError("white_point_calibration.wp_adjust.file_path "
+                              "cannot be empty when enabled");
+        }
+        if (wpa.i2c_address < 0x03 || wpa.i2c_address > 0x77) {
+            throw ConfigError("white_point_calibration.wp_adjust.i2c_address "
+                              "must be a 7-bit I2C address (0x03-0x77)");
+        }
+        if (wpa.page < 0 || wpa.page > 0xFF) {
+            throw ConfigError("white_point_calibration.wp_adjust.page "
+                              "must be between 0 and 255");
+        }
+        if (wpa.commit_timeout_ms < 0) {
+            throw ConfigError("white_point_calibration.wp_adjust."
+                              "commit_timeout_ms must be >= 0");
+        }
     }
 
     // Validate socket configuration

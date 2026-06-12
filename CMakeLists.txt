@@ -23,6 +23,7 @@ set(CORE_SOURCES
     src/notifier.cpp
     src/brightness_to_nits_lut.cpp
     src/thermal_compensation.cpp
+    src/wp_adjust_restore.cpp
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
     src/sensors/fpga_opti4001_sensor.cpp

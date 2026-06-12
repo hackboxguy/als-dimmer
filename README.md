@@ -353,6 +353,40 @@ The default path can be changed or disabled with:
 }
 ```
 
+#### wp_adjust restore (new-generation pixelpipe displays, optional)
+
+Displays built on the new pixelpipe FPGA expose a different white-point block
+(`wp_adjust`: Q4.12 RGB gains with shadow registers and a frame-boundary
+COMMIT) on the FPGA's new I2C slave. The daemon can additionally restore a
+**wp-cal-v1** calibration profile (written by the disp-tester
+"D65 Calibration" / "White Point Matching New" apps) at startup:
+
+```json
+"white_point_calibration": {
+  "enabled": true,
+  "wp_adjust": {
+    "enabled": true,
+    "file_path": "/home/pi/system-settings/wp-cal-d65.json",
+    "i2c_device": "/dev/i2c-1",
+    "i2c_address": "0x1E",
+    "page": "0x03",
+    "commit_timeout_ms": 2000
+  }
+}
+```
+
+This block is **disabled by default** and fully independent of the legacy
+replay above: the legacy `wpx/wpy/wpz` path runs unconditionally and
+unchanged (it is live on the Lattice displays), while the `wp_adjust` path
+only runs when explicitly enabled, the calibration file exists, and the
+wp_adjust ID probe answers on the configured address/page — so non-pixelpipe
+displays never see any traffic on that slave address. The restore performs
+shadow writes with readback verification, a boot-safe gain sanity window,
+and tolerates "commit pending until video starts" (the FPGA latches the
+update at the first vsync). All failures log and continue; the display stays
+in pass-through. Contract reference: `fpga-wp-adjust`
+`docs/i2c-master-sw-integration-guideline.md`.
+
 ### Thermal compensation (optional)
 
 The brightness-to-nits LUT captures the panel's response at the temperature

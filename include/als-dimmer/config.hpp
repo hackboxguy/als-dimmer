@@ -163,9 +163,24 @@ struct ThermalCompensationConfig {
     int poll_interval_sec = 30;        // How often to read the temperature
 };
 
+// wp_adjust (new-generation pixelpipe FPGA) boot restore. DISABLED by
+// default: this block sends I2C traffic to a separate slave address, so only
+// wp_adjust-capable display configs opt in. Fully independent of - and
+// additive to - the legacy wpx/wpy/wpz replay, which stays unconditional
+// for the Lattice legacy displays.
+struct WpAdjustCalibrationConfig {
+    bool enabled = false;
+    std::string file_path = "/home/pi/system-settings/wp-cal-d65.json";
+    std::string i2c_device;        // empty = reuse output.device
+    int i2c_address = 0x1E;        // FPGA new slave (7-bit)
+    int page = 0x03;               // wp_adjust register page on the new slave
+    int commit_timeout_ms = 2000;  // STATUS poll budget; pending-until-video is OK
+};
+
 struct WhitePointCalibrationConfig {
     bool enabled = true;
     std::string file_path = "/home/pi/system-settings/white-point-calibration.json";
+    WpAdjustCalibrationConfig wp_adjust;
 };
 
 struct Config {

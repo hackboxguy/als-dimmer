@@ -12,6 +12,7 @@
 #include "als-dimmer/sensors/null_sensor.hpp"
 #include "als-dimmer/brightness_to_nits_lut.hpp"
 #include "als-dimmer/thermal_compensation.hpp"
+#include "als-dimmer/wp_adjust_restore.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <fstream>
@@ -768,6 +769,11 @@ int main(int argc, char* argv[]) {
     }
     LOG_INFO("main", "Output initialized: " << output->getType());
     restoreWhitePointCalibration(*output, config.white_point_calibration);
+    // wp_adjust (pixelpipe FPGA) boot restore: additive, default-disabled,
+    // and fully independent of the legacy replay above (which stays
+    // unconditional for the Lattice legacy displays). Fail-soft by design.
+    als_dimmer::restoreWpAdjustCalibration(
+        config.white_point_calibration.wp_adjust, config.output.device);
 
     // Load brightness->nits calibration table (optional). Daemon runs identically
     // when this is absent or fails to load - just without absolute-brightness API.
