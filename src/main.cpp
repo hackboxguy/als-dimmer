@@ -162,6 +162,7 @@ namespace als_dimmer {
 std::unique_ptr<SensorInterface> createFileSensor(const std::string& file_path);
 std::unique_ptr<SensorInterface> createOPTI4001Sensor(const std::string& device, const std::string& address);
 std::unique_ptr<SensorInterface> createFPGAOpti4001Sensor(const std::string& device, const std::string& address, float scale_factor);
+std::unique_ptr<SensorInterface> createFPGAOpti4001LuxSensor(const std::string& device, const std::string& address);
 std::unique_ptr<SensorInterface> createFPGAOpti4001SysfsSensor(const std::string& sysfs_path, float scale_factor);
 
 // Forward declarations - Outputs
@@ -201,6 +202,8 @@ std::unique_ptr<als_dimmer::SensorInterface> createSensor(const als_dimmer::Conf
         return als_dimmer::createOPTI4001Sensor(config.sensor.device, config.sensor.address);
     } else if (config.sensor.type == "fpga_opti4001") {
         return als_dimmer::createFPGAOpti4001Sensor(config.sensor.device, config.sensor.address, config.sensor.scale_factor);
+    } else if (config.sensor.type == "fpga_opti4001_lux") {
+        return als_dimmer::createFPGAOpti4001LuxSensor(config.sensor.device, config.sensor.address);
     } else if (config.sensor.type == "can_als") {
         // Parse CAN ID from hex string (e.g., "0x0A2" -> 0x0A2)
         uint32_t can_id = static_cast<uint32_t>(std::stoul(config.sensor.can_id, nullptr, 16));

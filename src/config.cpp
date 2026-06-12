@@ -54,6 +54,8 @@ Config Config::loadFromFile(const std::string& filename) {
     }
     if (sensor_json.contains("scale_factor")) {
         config.sensor.scale_factor = sensor_json["scale_factor"].get<float>();
+    } else if (config.sensor.type == "fpga_opti4001_lux") {
+        config.sensor.scale_factor = 1.0f;
     }
 
     // Parse output configuration
@@ -418,12 +420,16 @@ void Config::validate() const {
     }
 
     // Type-specific validation
-    if (sensor.type == "opti4001" || sensor.type == "veml7700" || sensor.type == "custom_i2c" || sensor.type == "fpga_opti4001") {
+    if (sensor.type == "opti4001" || sensor.type == "veml7700" || sensor.type == "custom_i2c" || sensor.type == "fpga_opti4001" || sensor.type == "fpga_opti4001_lux") {
         if (sensor.device.empty()) {
             throw ConfigError("sensor.device is required for I2C sensor types");
         }
         if (sensor.address.empty()) {
             throw ConfigError("sensor.address is required for I2C sensor types");
+        }
+        if (sensor.type == "fpga_opti4001_lux" &&
+            (sensor.scale_factor < 0.999f || sensor.scale_factor > 1.001f)) {
+            throw ConfigError("sensor.scale_factor must be 1.0 for fpga_opti4001_lux");
         }
     } else if (sensor.type == "file") {
         if (sensor.file_path.empty()) {

@@ -301,7 +301,8 @@ external app, not from the streamdeck.
 See `configs/` directory for sample configurations:
 - `config_opti4001_ddcutil.json` - OPTI4001 sensor + DDC/CI monitor
 - `config_opti4001_boepwm.json` - OPTI4001 sensor + BOE display via MPS MPQ3367 + Pi PWM (with reference brightness-to-nits LUT)
-- `config_fpga_opti4001_dimmer2048.json` - FPGA-bridged OPTI4001 + FPGA dimmer (16-bit native)
+- `config_fpga_opti4001_dimmer2048.json` - Legacy FPGA-bridged OPTI4001 raw/scaled reader + FPGA dimmer (16-bit native)
+- `config_fpga_opti4001_lux_dimmer2048.json` - Fixed-RTL FPGA OPTI4001 integer-lux reader + FPGA dimmer (16-bit native)
 - `config_can_als_file.json` - CAN ALS sensor + file output (for testing)
 - `config_simulation.json` - File-based simulation for testing
 

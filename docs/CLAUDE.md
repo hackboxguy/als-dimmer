@@ -199,7 +199,7 @@ Benefits:
 ```json
 {
   "sensor": {
-    "type": "opti4001",           // can_als | opti4001 | fpga_opti4001 | file
+    "type": "opti4001",           // can_als | opti4001 | fpga_opti4001 | fpga_opti4001_lux | file
     "device": "/dev/i2c-1",       // For I2C sensors
     "address": "0x44",            // For I2C sensors (hex string)
     "file_path": "/tmp/lux.txt",  // For file sensor (simulation)
@@ -2017,9 +2017,9 @@ These still work correctly but use the old `[ComponentName] message` format with
 
 ---
 
-## FPGA-Based OPT4001 Sensor (fpga_opti4001)
+## FPGA-Based OPT4001 Sensors (fpga_opti4001, fpga_opti4001_lux)
 
-**Status:** ✅ IMPLEMENTED (2025-11-08)
+**Status:** ✅ IMPLEMENTED (legacy raw/scaled reader 2025-11-08; fixed-RTL integer-lux reader 2026-06-12)
 
 Support for FPGA-based ambient light sensor bridge where an FPGA acts as an I2C slave to the Raspberry Pi and maintains a cached reading from an OPT4001 sensor.
 
@@ -2031,41 +2031,67 @@ Support for FPGA-based ambient light sensor bridge where an FPGA acts as an I2C 
 - **Caching:** FPGA maintains latest lux reading in internal cache
 - **Benefit:** Reduces Pi's I2C complexity, offloads sensor timing to FPGA
 
+Two explicit sensor types are supported so legacy and fixed FPGA bitstreams can coexist:
+
+| Sensor type | Host register contract | Intended bitstream |
+| --- | --- | --- |
+| `fpga_opti4001` | `0x0C -> 00 + raw24`; `lux = raw24 * scale_factor` | Existing/legacy RTL |
+| `fpga_opti4001_lux` | `0x0C -> uint32 big-endian integer lux`; `scale_factor = 1.0` | Fixed full-range RTL |
+
 ### I2C Protocol
 
-**Command Transaction:**
+**Shared Command Transaction:**
 ```
 Write: 4 bytes fixed command
   0x00 0x00 0x00 0x0C
-
 Read: 4 bytes response
-  Byte 0: Reserved (ignore)
-  Bytes 1-3: 24-bit lux value (big-endian)
 ```
 
-**Data Extraction:**
+**Legacy `fpga_opti4001` Response:**
+```
+Read: 4 bytes response
+  Byte 0: Reserved (ignore)
+  Bytes 1-3: 24-bit raw value (big-endian)
+```
+
+**Legacy Data Extraction:**
 ```cpp
 uint32_t raw_value = (buf[1] << 16) | (buf[2] << 8) | buf[3];
-float lux = raw_value * 0.64f;
+float lux = raw_value * scale_factor;
+```
+
+**Fixed-RTL `fpga_opti4001_lux` Response:**
+```
+Read: 4 bytes response
+  Bytes 0-3: 32-bit integer lux value (big-endian)
+```
+
+**Fixed-RTL Data Extraction:**
+```cpp
+uint32_t lux_u32 = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+float lux = static_cast<float>(lux_u32);
 ```
 
 **Error Detection:**
-- Response `0xFFFFFFFF` indicates FPGA or sensor failure
-- Valid range: 0 to ~100,000 lux (OPT4001 max ~83k lux)
+- Response `0xFFFFFFFF` indicates FPGA/sensor failure or not-ready
+- Legacy configs keep their historical `scale_factor`
+- Fixed-RTL configs use `scale_factor: 1.0` and report the full SOT-5X3 range up to about 117k lux
 
 ### Implementation Details
 
 **Files:**
-- Implementation: [src/sensors/fpga_opti4001_sensor.cpp](../src/sensors/fpga_opti4001_sensor.cpp)
+- Legacy implementation: [src/sensors/fpga_opti4001_sensor.cpp](../src/sensors/fpga_opti4001_sensor.cpp)
+- Fixed-RTL implementation: [src/sensors/fpga_opti4001_lux_sensor.cpp](../src/sensors/fpga_opti4001_lux_sensor.cpp)
 - Integration: [src/main.cpp](../src/main.cpp) (factory function)
 - Configuration validation: [src/config.cpp](../src/config.cpp)
 
 **Features:**
 - Direct I2C communication using Linux I2C device interface
-- Big-endian 24-bit value extraction
+- Big-endian 24-bit legacy raw extraction
+- Big-endian 32-bit fixed-RTL integer lux extraction
 - Error handling for I2C failures and FPGA error condition
 - Debug output for first 10 readings
-- Sanity check for out-of-range values (> 100k lux)
+- Sanity check for out-of-range values (> 120k lux)
 
 **Configuration Example:**
 ```json
@@ -2099,26 +2125,40 @@ float lux = raw_value * 0.64f;
 # I2C command (address 0x1D)
 i2ctransfer -y 1 w4@0x1D 0x00 0x00 0x00 0x0C r4
 
-# Example response
+# Legacy example response
 0x00 0x00 0x72 0xF9
 
-# Conversion
+# Legacy conversion
 Raw value: 0x0072F9 = 29,433
 Lux: 29,433 * 0.64 = 18,837 lux
+
+# Fixed-RTL example response
+0x00 0x01 0x38 0x80
+
+# Fixed-RTL conversion
+Lux: 0x00013880 = 80,000 lux
 ```
 
 **Usage:**
 ```bash
-# With DDC/CI output
+# Legacy RTL with DDC/CI output
 ./als-dimmer --config configs/config_fpga_opti4001_ddcutil.json
 
-# With custom dimmer output
+# Fixed RTL with DDC/CI output
+./als-dimmer --config configs/config_fpga_opti4001_lux_ddcutil.json
+
+# Legacy RTL with custom dimmer output
 ./als-dimmer --config configs/config_fpga_opti4001_dimmer200.json
+
+# Fixed RTL with custom dimmer output
+./als-dimmer --config configs/config_fpga_opti4001_lux_dimmer200.json
 ```
 
 **Test Files:**
 - [configs/config_fpga_opti4001_ddcutil.json](../configs/config_fpga_opti4001_ddcutil.json)
 - [configs/config_fpga_opti4001_dimmer200.json](../configs/config_fpga_opti4001_dimmer200.json)
+- [configs/config_fpga_opti4001_lux_ddcutil.json](../configs/config_fpga_opti4001_lux_ddcutil.json)
+- [configs/config_fpga_opti4001_lux_dimmer200.json](../configs/config_fpga_opti4001_lux_dimmer200.json)
 
 **Benefits:**
 - Simplified Pi software (single I2C transaction per reading)

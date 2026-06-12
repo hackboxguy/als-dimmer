@@ -10,7 +10,7 @@ namespace als_dimmer {
 // Configuration structures matching JSON schema
 
 struct SensorConfig {
-    std::string type;           // opti4001 | veml7700 | can_als | fpga_opti4001 | fpga_opti4001_sysfs | custom_i2c | file
+    std::string type;           // opti4001 | veml7700 | can_als | fpga_opti4001 | fpga_opti4001_lux | fpga_opti4001_sysfs | custom_i2c | file
     std::string device;         // For I2C sensors
     std::string address;        // For I2C sensors (hex string)
     std::string file_path;      // For file sensor and sysfs-based sensors
@@ -21,7 +21,7 @@ struct SensorConfig {
     int timeout_ms = 5000;      // Timeout for considering data stale
 
     // Calibration/scaling factor for sensor readings
-    float scale_factor = 0.64f;  // Default for fpga_opti4001 (raw * scale_factor = lux)
+    float scale_factor = 0.64f;  // Legacy fpga_opti4001 raw scale; fpga_opti4001_lux requires 1.0
 };
 
 struct OutputConfig {
