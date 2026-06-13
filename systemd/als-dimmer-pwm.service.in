@@ -1,7 +1,7 @@
 [Unit]
 Description=ALS-Dimmer (secondary, BOE i2c-tiny-usb-pwm) — dual-display compare mode
 Documentation=https://github.com/hackboxguy/als-dimmer.git
-After=network.target multi-user.target
+After=network.target
 Wants=network.target
 # Independent of the primary als-dimmer.service: the secondary doesn't talk
 # to the primary at runtime. Started/stopped on demand by the external compare

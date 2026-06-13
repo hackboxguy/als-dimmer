@@ -1,7 +1,7 @@
 [Unit]
 Description=ALS-Dimmer: Ambient Light Sensor Based Display Brightness Control
 Documentation=https://github.com/hackboxguy/als-dimmer.git
-After=network.target multi-user.target
+After=network.target
 Wants=network.target
 
 [Service]

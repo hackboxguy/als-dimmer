@@ -1599,7 +1599,7 @@ This should be configurable per custom display type.
 ```ini
 [Unit]
 Description=ALS-Dimmer: Ambient Light Sensor Based Display Brightness Control
-After=network.target multi-user.target
+After=network.target
 Wants=network.target
 
 [Service]
@@ -2453,7 +2453,7 @@ ${CMAKE_INSTALL_PREFIX}/
 ```ini
 [Unit]
 Description=ALS-Dimmer: Ambient Light Sensor Based Display Brightness Control
-After=network.target multi-user.target
+After=network.target
 Wants=network.target
 
 [Service]
