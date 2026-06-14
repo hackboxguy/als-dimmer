@@ -91,17 +91,5 @@
       "scale": 0.1
     },
     "poll_interval_sec": 30
-  },
-
-  "_comment_white_point": "wp_adjust (new pixelpipe 0x1E page-3 white-point) boot replay: applies the D65/match calibration (wp-cal-d65.json) at startup over the FPGA new slave, with readback-verify + frame-boundary COMMIT. MUTUALLY EXCLUSIVE with the legacy wpx/wpy/wpz replay: the daemon probes the wp_adjust ID on 0x1E and, when present (this 12.3 pixelpipe display, which also exposes 0x1D), uses this path and SKIPS the legacy one; a legacy-only display (0x1D only) falls back to the legacy replay. Fail-soft: a missing/invalid file leaves the display in pass-through.",
-  "white_point_calibration": {
-    "enabled": true,
-    "wp_adjust": {
-      "enabled": true,
-      "file_path": "/home/pi/system-settings/wp-cal-d65.json",
-      "i2c_address": "0x1E",
-      "page": "0x03",
-      "commit_timeout_ms": 2000
-    }
   }
 }

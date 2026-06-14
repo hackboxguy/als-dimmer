@@ -163,13 +163,17 @@ struct ThermalCompensationConfig {
     int poll_interval_sec = 30;        // How often to read the temperature
 };
 
-// wp_adjust (new-generation pixelpipe FPGA) boot restore. DISABLED by
-// default: this block sends I2C traffic to a separate slave address, so only
-// wp_adjust-capable display configs opt in. Fully independent of - and
-// additive to - the legacy wpx/wpy/wpz replay, which stays unconditional
-// for the Lattice legacy displays.
+// wp_adjust (new-generation pixelpipe FPGA) boot restore. ON by default and
+// PANEL-AGNOSTIC: at boot the daemon probes the wp_adjust ID on the new slave
+// and, ONLY if it answers, applies whatever wp-cal-v1 profile is at file_path -
+// the daemon never needs to know the display size, just what answers on the bus
+// and what calibration file is present. A legacy display (only 0x1D) NACKs the
+// probe and the daemon falls back to the legacy wpx/wpy/wpz replay; the two are
+// mutually exclusive (see main.cpp + restoreWpAdjustCalibration). The probe is
+// the real gate (a single harmless ID read on a non-pixelpipe display); set
+// enabled=false only to suppress the probe and force the legacy path.
 struct WpAdjustCalibrationConfig {
-    bool enabled = false;
+    bool enabled = true;
     std::string file_path = "/home/pi/system-settings/wp-cal-d65.json";
     std::string i2c_device;        // empty = reuse output.device
     int i2c_address = 0x1E;        // FPGA new slave (7-bit)

@@ -355,21 +355,37 @@ The default path can be changed or disabled with:
 }
 ```
 
-#### wp_adjust restore (new-generation pixelpipe displays, optional)
+#### wp_adjust restore (new-generation pixelpipe displays — automatic)
 
 Displays built on the new pixelpipe FPGA expose a different white-point block
 (`wp_adjust`: Q4.12 RGB gains with shadow registers and a frame-boundary
-COMMIT) on the FPGA's new I2C slave. The daemon can additionally restore a
-**wp-cal-v1** calibration profile (written by the disp-tester
-"D65 Calibration" / "White Point Matching New" apps) at startup:
+COMMIT) on the FPGA's new I2C slave. This restore is **on by default and
+panel-agnostic** — the daemon does NOT need to know the display size or model.
+At boot it probes the `wp_adjust` ID on the new slave and, only if it answers,
+applies whatever **wp-cal-v1** profile is at the configured path (written per
+panel by the disp-tester "D65 Calibration" / "White Point Matching New" apps and
+stored on that Pi). No per-display config is required.
+
+White-point replay is **mutually exclusive** and selected at runtime by that
+probe. If the `wp_adjust` ID answers — a new-generation pixelpipe display, which
+exposes BOTH the `wp_adjust` block on the new slave AND the legacy `0x1D` slave —
+the `wp_adjust` path owns the display's white point and the legacy `wpx/wpy/wpz`
+replay above is **skipped**. If it does not answer — a legacy display with only
+`0x1D` — the daemon falls back to the legacy replay (unchanged, still live on the
+Lattice displays). So a display never runs both paths, and a non-pixelpipe
+display only sees a single NACKed ID read on the new slave before falling back.
+Even when `wp_adjust` is present, a missing/invalid calibration file is non-fatal:
+the display stays in `wp_adjust` pass-through (still not the legacy path).
+
+Nothing needs configuring for the common case. To point at a different profile,
+change the I2C address/page, or suppress the probe entirely (force the legacy
+path), override the defaults:
 
 ```json
 "white_point_calibration": {
-  "enabled": true,
   "wp_adjust": {
     "enabled": true,
     "file_path": "/home/pi/system-settings/wp-cal-d65.json",
-    "i2c_device": "/dev/i2c-1",
     "i2c_address": "0x1E",
     "page": "0x03",
     "commit_timeout_ms": 2000
@@ -377,23 +393,10 @@ COMMIT) on the FPGA's new I2C slave. The daemon can additionally restore a
 }
 ```
 
-This block is **disabled by default**. When enabled, white-point replay is
-**mutually exclusive** and selected at runtime by hardware probe: the daemon
-probes the `wp_adjust` ID on the new slave first. If it answers — a
-new-generation pixelpipe display, which exposes BOTH the `wp_adjust` block on
-the new slave AND the legacy `0x1D` slave — the `wp_adjust` path owns the
-display's white point and the legacy `wpx/wpy/wpz` replay above is **skipped**.
-If it does not answer — a legacy display with only `0x1D`, or `wp_adjust` not
-opted in — the daemon falls back to the legacy replay (unchanged, still live on
-the Lattice displays). So a display never runs both paths, and a non-pixelpipe
-display only sees a single NACKed ID read on the new slave before falling back.
-Even when `wp_adjust` is present, a missing/invalid calibration file is
-non-fatal: the display stays in `wp_adjust` pass-through (it is still not the
-legacy path). The restore performs shadow writes with readback verification, a
-boot-safe gain sanity window, and tolerates "commit pending until video starts"
-(the FPGA latches the update at the first vsync). All failures log and continue.
-Contract reference: `fpga-wp-adjust`
-`docs/i2c-master-sw-integration-guideline.md`.
+The restore performs shadow writes with readback verification, a boot-safe gain
+sanity window, and tolerates "commit pending until video starts" (the FPGA
+latches the update at the first vsync). All failures log and continue. Contract
+reference: `fpga-wp-adjust` `docs/i2c-master-sw-integration-guideline.md`.
 
 ### Thermal compensation (optional)
 
