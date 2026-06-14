@@ -174,7 +174,13 @@ struct ThermalCompensationConfig {
 // enabled=false only to suppress the probe and force the legacy path.
 struct WpAdjustCalibrationConfig {
     bool enabled = true;
-    std::string file_path = "/home/pi/system-settings/wp-cal-d65.json";
+    // Canonical boot-replay profile: BOTH the disp-tester "D65 Calibration" and
+    // "White Point Matching New" apps write their wp-cal-v1 profile here, so boot
+    // replay is source-agnostic (whichever the user ran last wins; the profile's
+    // own metadata records which method). Independent of the legacy wpx/wpy/wpz
+    // file (WhitePointCalibrationConfig.file_path) - a different file, format, and
+    // code path, selected by the runtime probe.
+    std::string file_path = "/home/pi/system-settings/wp-cal.json";
     std::string i2c_device;        // empty = reuse output.device
     int i2c_address = 0x1E;        // FPGA new slave (7-bit)
     int page = 0x03;               // wp_adjust register page on the new slave

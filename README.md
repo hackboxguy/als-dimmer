@@ -362,9 +362,13 @@ Displays built on the new pixelpipe FPGA expose a different white-point block
 COMMIT) on the FPGA's new I2C slave. This restore is **on by default and
 panel-agnostic** — the daemon does NOT need to know the display size or model.
 At boot it probes the `wp_adjust` ID on the new slave and, only if it answers,
-applies whatever **wp-cal-v1** profile is at the configured path (written per
-panel by the disp-tester "D65 Calibration" / "White Point Matching New" apps and
-stored on that Pi). No per-display config is required.
+applies whatever **wp-cal-v1** profile is at the configured path. Both disp-tester
+apps — "D65 Calibration" and "White Point Matching New" — write their profile to
+the SAME canonical file (`/home/pi/system-settings/wp-cal.json`), so boot replay
+is **source-agnostic**: whichever method the user last ran is what gets applied
+(the profile's own metadata records which it was). No per-display config is
+required. This is entirely separate from the legacy `wpx/wpy/wpz` replay above —
+a different file, format, and code path — and the two never both run on a display.
 
 White-point replay is **mutually exclusive** and selected at runtime by that
 probe. If the `wp_adjust` ID answers — a new-generation pixelpipe display, which
@@ -385,7 +389,7 @@ path), override the defaults:
 "white_point_calibration": {
   "wp_adjust": {
     "enabled": true,
-    "file_path": "/home/pi/system-settings/wp-cal-d65.json",
+    "file_path": "/home/pi/system-settings/wp-cal.json",
     "i2c_address": "0x1E",
     "page": "0x03",
     "commit_timeout_ms": 2000
