@@ -391,8 +391,10 @@ Config Config::loadFromFile(const std::string& filename) {
             config.white_point_calibration.file_path = wp_json["file_path"].get<std::string>();
         }
 
-        // Optional wp_adjust (pixelpipe FPGA) restore block - default
-        // disabled; accepts integers or hex strings for address/page.
+        // Optional wp_adjust (pixelpipe FPGA) restore block. The feature is ON
+        // by default and gated by the runtime 0x1E probe (not this flag); set
+        // enabled=false only to force the legacy path. Accepts integers or hex
+        // strings for address/page.
         if (wp_json.contains("wp_adjust")) {
             auto& wpa_json = wp_json["wp_adjust"];
             auto& wpa = config.white_point_calibration.wp_adjust;

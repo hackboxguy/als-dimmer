@@ -769,12 +769,14 @@ int main(int argc, char* argv[]) {
     }
     LOG_INFO("main", "Output initialized: " << output->getType());
     // White-point boot restore - MUTUALLY EXCLUSIVE new-vs-legacy selection by
-    // hardware probe. A new-generation pixelpipe display exposes the wp_adjust
-    // block on the FPGA new slave (0x1E) AND the legacy 0x1D slave; a legacy
-    // display exposes only 0x1D. So: try wp_adjust first - if its ID answers
-    // (Present) it owns white point and we SKIP the legacy wpx/wpy/wpz replay;
-    // if absent (only-0x1D / non-pixelpipe display, or wp_adjust not opted in)
-    // we fall back to the legacy replay (unchanged). Both paths are fail-soft.
+    // hardware probe. White point lives ONLY on the new slave's wp_adjust block
+    // (0x1E, page 3); the legacy 0x1D slave carries NO wp_adjust mirror. A
+    // pixelpipe display has both slaves (wp_adjust on 0x1E + the legacy 0x1D
+    // control slave); a legacy display has only 0x1D. So: try wp_adjust first -
+    // if its ID answers on 0x1E (Present) it owns white point and we SKIP the
+    // legacy wpx/wpy/wpz replay; if absent (only-0x1D / non-pixelpipe display, or
+    // wp_adjust not opted in) we fall back to the legacy replay (unchanged). Both
+    // paths are fail-soft.
     const auto wp_status = als_dimmer::restoreWpAdjustCalibration(
         config.white_point_calibration.wp_adjust, config.output.device);
     if (wp_status == als_dimmer::WpAdjustRestoreStatus::NotPresent) {

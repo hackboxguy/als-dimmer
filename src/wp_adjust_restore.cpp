@@ -332,6 +332,17 @@ WpAdjustRestoreStatus restoreWpAdjustCalibration(
             return WpAdjustRestoreStatus::Present;
         }
     }
+    for (int i = 0; i < 3; ++i) {
+        uint16_t readback = 0;
+        const uint16_t want = static_cast<uint16_t>(profile.offsets[i]);
+        if (!bus.read16(REG_OFFSET_SHADOW[i], readback) || readback != want) {
+            LOG_WARN("wp_adjust", "Shadow readback mismatch on offset "
+                     << CHANNEL_NAMES[i] << " (wrote 0x" << std::hex << want
+                     << ", read 0x" << readback << std::dec
+                     << "); not committing");
+            return WpAdjustRestoreStatus::Present;
+        }
+    }
     {
         uint16_t readback = 0;
         if (!bus.read16(REG_CONTROL_SHADOW, readback) || readback != control) {
