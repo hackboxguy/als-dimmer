@@ -342,7 +342,9 @@ If the file exists and contains top-level integer `wpx`, `wpy`, and `wpz`
 values in the FPGA-supported `0..256` range, the daemon writes them to the FPGA
 white-point registers once during startup. If the file is missing, malformed,
 or the active output does not support FPGA white-point registers, the daemon
-logs the reason and continues without changing the registers.
+logs the reason and continues without changing the registers. On new-generation
+pixelpipe displays this legacy path is the **fallback**: it runs only when the
+`wp_adjust` block (below) is not present/enabled — see that section.
 
 The default path can be changed or disabled with:
 
@@ -375,16 +377,22 @@ COMMIT) on the FPGA's new I2C slave. The daemon can additionally restore a
 }
 ```
 
-This block is **disabled by default** and fully independent of the legacy
-replay above: the legacy `wpx/wpy/wpz` path runs unconditionally and
-unchanged (it is live on the Lattice displays), while the `wp_adjust` path
-only runs when explicitly enabled, the calibration file exists, and the
-wp_adjust ID probe answers on the configured address/page — so non-pixelpipe
-displays never see any traffic on that slave address. The restore performs
-shadow writes with readback verification, a boot-safe gain sanity window,
-and tolerates "commit pending until video starts" (the FPGA latches the
-update at the first vsync). All failures log and continue; the display stays
-in pass-through. Contract reference: `fpga-wp-adjust`
+This block is **disabled by default**. When enabled, white-point replay is
+**mutually exclusive** and selected at runtime by hardware probe: the daemon
+probes the `wp_adjust` ID on the new slave first. If it answers — a
+new-generation pixelpipe display, which exposes BOTH the `wp_adjust` block on
+the new slave AND the legacy `0x1D` slave — the `wp_adjust` path owns the
+display's white point and the legacy `wpx/wpy/wpz` replay above is **skipped**.
+If it does not answer — a legacy display with only `0x1D`, or `wp_adjust` not
+opted in — the daemon falls back to the legacy replay (unchanged, still live on
+the Lattice displays). So a display never runs both paths, and a non-pixelpipe
+display only sees a single NACKed ID read on the new slave before falling back.
+Even when `wp_adjust` is present, a missing/invalid calibration file is
+non-fatal: the display stays in `wp_adjust` pass-through (it is still not the
+legacy path). The restore performs shadow writes with readback verification, a
+boot-safe gain sanity window, and tolerates "commit pending until video starts"
+(the FPGA latches the update at the first vsync). All failures log and continue.
+Contract reference: `fpga-wp-adjust`
 `docs/i2c-master-sw-integration-guideline.md`.
 
 ### Thermal compensation (optional)

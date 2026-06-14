@@ -210,80 +210,97 @@ bool gainsInBootWindow(const WpAdjustProfile& profile) {
 
 } // namespace
 
-bool restoreWpAdjustCalibration(const WpAdjustCalibrationConfig& cfg,
-                                const std::string& fallback_i2c_device) {
+WpAdjustRestoreStatus restoreWpAdjustCalibration(
+    const WpAdjustCalibrationConfig& cfg,
+    const std::string& fallback_i2c_device) {
     if (!cfg.enabled) {
-        // Default-off gap-filler gate: stay silent and send no I2C traffic
-        // (Lattice legacy displays never opt in; address 0x1E is not ours
-        // to probe there).
-        return false;
-    }
-
-    if (cfg.file_path.empty()) {
-        LOG_WARN("wp_adjust", "wp_adjust restore enabled but file_path is empty");
-        return false;
-    }
-    if (access(cfg.file_path.c_str(), F_OK) != 0) {
-        if (errno == ENOENT) {
-            LOG_INFO("wp_adjust", "No wp_adjust calibration file at "
-                     << cfg.file_path << "; skipping restore");
-        } else {
-            LOG_WARN("wp_adjust", "Cannot access wp_adjust calibration file "
-                     << cfg.file_path << ": " << strerror(errno));
-        }
-        return false;
-    }
-
-    WpAdjustProfile profile;
-    if (!parseProfile(cfg.file_path, profile)) {
-        return false;
-    }
-    if (!gainsInBootWindow(profile)) {
-        return false;
+        // Default-off gate: not opted in, so send no I2C traffic and let the
+        // caller run the legacy wpx/wpy/wpz path (Lattice / legacy displays).
+        return WpAdjustRestoreStatus::NotPresent;
     }
 
     const std::string device =
         cfg.i2c_device.empty() ? fallback_i2c_device : cfg.i2c_device;
     if (device.empty()) {
         LOG_WARN("wp_adjust", "No I2C device configured for wp_adjust restore "
-                 "(set white_point_calibration.wp_adjust.i2c_device)");
-        return false;
+                 "(set white_point_calibration.wp_adjust.i2c_device); "
+                 "deferring to legacy white-point restore");
+        return WpAdjustRestoreStatus::NotPresent;
     }
 
     WpAdjustBus bus;
     if (!bus.open_bus(device, cfg.i2c_address, cfg.page)) {
-        return false;
+        // Cannot open/select the bus -> cannot tell new from legacy; defer to
+        // the legacy path (it self-gates on the output type).
+        return WpAdjustRestoreStatus::NotPresent;
     }
 
-    // Probe: ID, register-map major version, FRAC_BITS. A display without
-    // the wp_adjust block (or with the RTL not yet integrated) fails here
-    // and is skipped quietly.
+    // --- Presence probe FIRST, before touching the calibration file. ---
+    // A new-generation pixelpipe display answers the wp_adjust ID on the new
+    // slave (and ALSO exposes the legacy 0x1D slave); a legacy display answers
+    // only on 0x1D and NACKs here. So the wp_adjust ID is the new-vs-legacy
+    // discriminator: present => new path owns white point; absent => legacy.
     uint16_t id = 0, version = 0, status = 0;
     if (!bus.read16(REG_ID, id) || id != WP_ADJUST_ID) {
         LOG_INFO("wp_adjust", "wp_adjust not detected on " << device
                  << " addr 0x" << std::hex << cfg.i2c_address << " page 0x"
-                 << cfg.page << std::dec << "; skipping restore");
-        return false;
+                 << cfg.page << std::dec
+                 << "; deferring to legacy white-point restore");
+        return WpAdjustRestoreStatus::NotPresent;
     }
+
+    // From here the wp_adjust block IS present (pixelpipe display); the new path
+    // owns this display's white point. EVERY exit below returns Present so the
+    // caller does NOT also run the legacy wpx/wpy/wpz restore - even when the
+    // calibration file is missing/invalid (the display just stays in wp_adjust
+    // pass-through / unity).
     if (!bus.read16(REG_VERSION, version) ||
         ((version >> 8) & 0xFF) != WP_VERSION_MAJOR) {
         LOG_WARN("wp_adjust", "Unsupported wp_adjust register-map version 0x"
-                 << std::hex << version << std::dec << "; skipping restore");
-        return false;
+                 << std::hex << version << std::dec
+                 << "; not applying (display in pass-through)");
+        return WpAdjustRestoreStatus::Present;
     }
+
+    // Load + validate the calibration file. Missing/invalid is non-fatal: the
+    // display stays in wp_adjust pass-through, still not the legacy path.
+    if (cfg.file_path.empty()) {
+        LOG_WARN("wp_adjust", "wp_adjust present but file_path is empty; "
+                 "display left in pass-through");
+        return WpAdjustRestoreStatus::Present;
+    }
+    if (access(cfg.file_path.c_str(), F_OK) != 0) {
+        if (errno == ENOENT) {
+            LOG_INFO("wp_adjust", "No wp_adjust calibration file at "
+                     << cfg.file_path << "; display in pass-through");
+        } else {
+            LOG_WARN("wp_adjust", "Cannot access wp_adjust calibration file "
+                     << cfg.file_path << ": " << strerror(errno));
+        }
+        return WpAdjustRestoreStatus::Present;
+    }
+
+    WpAdjustProfile profile;
+    if (!parseProfile(cfg.file_path, profile)) {
+        return WpAdjustRestoreStatus::Present;
+    }
+    if (!gainsInBootWindow(profile)) {
+        return WpAdjustRestoreStatus::Present;
+    }
+
     if (!bus.read16(REG_STATUS, status)) {
-        LOG_WARN("wp_adjust", "STATUS read failed; skipping restore");
-        return false;
+        LOG_WARN("wp_adjust", "STATUS read failed; not applying");
+        return WpAdjustRestoreStatus::Present;
     }
     if (((status >> 8) & 0xFF) != profile.frac_bits) {
         LOG_WARN("wp_adjust", "FRAC_BITS mismatch: device reports "
                  << ((status >> 8) & 0xFF) << ", calibration expects "
-                 << profile.frac_bits << "; skipping restore");
-        return false;
+                 << profile.frac_bits << "; not applying");
+        return WpAdjustRestoreStatus::Present;
     }
     if (status & STATUS_COMMIT_PENDING) {
-        LOG_WARN("wp_adjust", "A commit is already pending; skipping restore");
-        return false;
+        LOG_WARN("wp_adjust", "A commit is already pending; not applying");
+        return WpAdjustRestoreStatus::Present;
     }
 
     // Shadow writes + readback verify (a lost/corrupted I2C write must not
@@ -301,7 +318,7 @@ bool restoreWpAdjustCalibration(const WpAdjustCalibrationConfig& cfg,
     ok = ok && bus.write16(REG_CONTROL_SHADOW, control);
     if (!ok) {
         LOG_WARN("wp_adjust", "Shadow register write failed; not committing");
-        return false;
+        return WpAdjustRestoreStatus::Present;
     }
 
     for (int i = 0; i < 3; ++i) {
@@ -312,7 +329,7 @@ bool restoreWpAdjustCalibration(const WpAdjustCalibrationConfig& cfg,
                      << CHANNEL_NAMES[i] << " (wrote 0x" << std::hex
                      << profile.gains[i] << ", read 0x" << readback
                      << std::dec << "); not committing");
-            return false;
+            return WpAdjustRestoreStatus::Present;
         }
     }
     {
@@ -320,13 +337,13 @@ bool restoreWpAdjustCalibration(const WpAdjustCalibrationConfig& cfg,
         if (!bus.read16(REG_CONTROL_SHADOW, readback) || readback != control) {
             LOG_WARN("wp_adjust", "Shadow readback mismatch on CONTROL; "
                      "not committing");
-            return false;
+            return WpAdjustRestoreStatus::Present;
         }
     }
 
     if (!bus.write16(REG_COMMIT, COMMIT_MAGIC)) {
         LOG_WARN("wp_adjust", "COMMIT write failed");
-        return false;
+        return WpAdjustRestoreStatus::Present;
     }
 
     // Poll for commit-consumed. Video may not be running yet at daemon
@@ -337,7 +354,7 @@ bool restoreWpAdjustCalibration(const WpAdjustCalibrationConfig& cfg,
     while (true) {
         if (!bus.read16(REG_STATUS, status)) {
             LOG_WARN("wp_adjust", "STATUS poll failed after COMMIT");
-            return false;
+            return WpAdjustRestoreStatus::Present;
         }
         if (status & STATUS_COMMIT_CONSUMED) {
             LOG_INFO("wp_adjust", "Applied wp_adjust calibration from "
@@ -345,17 +362,17 @@ bool restoreWpAdjustCalibration(const WpAdjustCalibrationConfig& cfg,
                      << profile.gains[0] << " G=0x" << profile.gains[1]
                      << " B=0x" << profile.gains[2] << std::dec
                      << " (committed)");
-            return true;
+            return WpAdjustRestoreStatus::Present;
         }
         if (!(status & STATUS_COMMIT_PENDING)) {
             LOG_INFO("wp_adjust", "wp_adjust calibration written; commit "
                      "state unknown (STATUS idle)");
-            return true;
+            return WpAdjustRestoreStatus::Present;
         }
         if (std::chrono::steady_clock::now() >= deadline) {
             LOG_INFO("wp_adjust", "wp_adjust calibration written; commit "
                      "pending until video starts");
-            return true;
+            return WpAdjustRestoreStatus::Present;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }

@@ -768,12 +768,21 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     LOG_INFO("main", "Output initialized: " << output->getType());
-    restoreWhitePointCalibration(*output, config.white_point_calibration);
-    // wp_adjust (pixelpipe FPGA) boot restore: additive, default-disabled,
-    // and fully independent of the legacy replay above (which stays
-    // unconditional for the Lattice legacy displays). Fail-soft by design.
-    als_dimmer::restoreWpAdjustCalibration(
+    // White-point boot restore - MUTUALLY EXCLUSIVE new-vs-legacy selection by
+    // hardware probe. A new-generation pixelpipe display exposes the wp_adjust
+    // block on the FPGA new slave (0x1E) AND the legacy 0x1D slave; a legacy
+    // display exposes only 0x1D. So: try wp_adjust first - if its ID answers
+    // (Present) it owns white point and we SKIP the legacy wpx/wpy/wpz replay;
+    // if absent (only-0x1D / non-pixelpipe display, or wp_adjust not opted in)
+    // we fall back to the legacy replay (unchanged). Both paths are fail-soft.
+    const auto wp_status = als_dimmer::restoreWpAdjustCalibration(
         config.white_point_calibration.wp_adjust, config.output.device);
+    if (wp_status == als_dimmer::WpAdjustRestoreStatus::NotPresent) {
+        restoreWhitePointCalibration(*output, config.white_point_calibration);
+    } else {
+        LOG_INFO("main", "wp_adjust white-point block present on the FPGA new "
+                 "slave; skipping legacy wpx/wpy/wpz restore");
+    }
 
     // Load brightness->nits calibration table (optional). Daemon runs identically
     // when this is absent or fails to load - just without absolute-brightness API.
