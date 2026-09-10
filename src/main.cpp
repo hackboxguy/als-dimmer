@@ -176,6 +176,7 @@ std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device
                                                         uint8_t address,
                                                         const std::string& type);
 std::unique_ptr<OutputInterface> createFPGASysfsOutput(const std::string& sysfs_path, int max_value);
+std::unique_ptr<OutputInterface> createIocTconOutput(const std::string& device, const std::string& address, int range_lo, int range_hi);
 std::unique_ptr<OutputInterface> createBoePwmOutput(const std::string& i2c_device,
                                                      uint8_t i2c_address,
                                                      const std::string& pwm_chip,
@@ -245,6 +246,13 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
         // Parse I2C address from hex string (e.g., "0x1D" -> 0x1D)
         uint8_t address = static_cast<uint8_t>(std::stoul(config.output.address, nullptr, 16));
         return als_dimmer::createI2CDimmerOutput(config.output.device, address, config.output.type);
+    }
+    else if (config.output.type == "ioc_tcon") {
+        return als_dimmer::createIocTconOutput(
+            config.output.device,
+            config.output.address,
+            config.output.value_range[0],
+            config.output.value_range[1]);
     }
     else if (config.output.type == "fpga_sysfs_dimmer") {
         return als_dimmer::createFPGASysfsOutput(

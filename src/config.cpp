@@ -88,6 +88,11 @@ Config Config::loadFromFile(const std::string& filename) {
     }
     if (output_json.contains("value_range")) {
         config.output.value_range = output_json["value_range"].get<std::vector<int>>();
+    } else if (config.output.type == "ioc_tcon") {
+        // The panel TCON's own scale for register 0x054C: 13 (0x000D, 5 nits)
+        // to 2047 (0x07FF, 800 nits). The generic [0, 100] default would be
+        // both wrong and, with a floor of 0, below what the TCON accepts.
+        config.output.value_range = { 13, 2047 };
     }
     if (output_json.contains("internal_range")) {
         config.output.internal_range = output_json["internal_range"].get<std::vector<int>>();
@@ -535,6 +540,22 @@ void Config::validate() const {
         }
         if (output.value_range.size() != 2 || output.value_range[1] <= 0) {
             throw ConfigError("output.value_range must be [min, max] with max > 0 for fpga_sysfs_dimmer output type");
+        }
+    } else if (output.type == "ioc_tcon") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for ioc_tcon output type (the I2C bus the IOC is on, e.g. /dev/i2c-1)");
+        }
+        if (output.address.empty()) {
+            throw ConfigError("output.address is required for ioc_tcon output type (the IOC slave, e.g. 0x66)");
+        }
+        // value_range is the TCON's own scale, not a percentage: its floor is
+        // the panel's documented 5-nit minimum, not "off". The plugin checks
+        // it again at init against the range the firmware publishes.
+        if (output.value_range.size() != 2 ||
+            output.value_range[0] < 0 ||
+            output.value_range[0] >= output.value_range[1] ||
+            output.value_range[1] > 65535) {
+            throw ConfigError("output.value_range must be [min, max] with 0 <= min < max <= 65535 for ioc_tcon output type (default [13, 2047])");
         }
     } else if (output.type == "i2c_pwm") {
         if (output.device.empty()) {

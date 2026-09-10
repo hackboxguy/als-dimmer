@@ -36,6 +36,7 @@ set(CORE_SOURCES
     src/outputs/fpga_sysfs_output.cpp
     src/outputs/boe_pwm_output.cpp
     src/outputs/i2c_pwm_output.cpp
+    src/outputs/ioc_tcon_output.cpp
 )
 
 # Create executable
