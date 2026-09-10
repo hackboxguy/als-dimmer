@@ -303,8 +303,52 @@ See `configs/` directory for sample configurations:
 - `config_opti4001_boepwm.json` - OPTI4001 sensor + BOE display via MPS MPQ3367 + Pi PWM (with reference brightness-to-nits LUT)
 - `config_fpga_opti4001_dimmer2048.json` - Legacy FPGA-bridged OPTI4001 raw/scaled reader + FPGA dimmer (16-bit native)
 - `config_fpga_opti4001_lux_dimmer2048.json` - Fixed-RTL FPGA OPTI4001 integer-lux reader + FPGA dimmer (16-bit native)
+- `config_ioc_opt5001_tcon_ots17.json` - OTS-OLED 17.3" panel: OPT5001 read through the ioc-deserializer MCU + panel TCON brightness through the same MCU
 - `config_can_als_file.json` - CAN ALS sensor + file output (for testing)
 - `config_simulation.json` - File-based simulation for testing
+
+### `ioc_opt5001` — ambient light through the ioc-deserializer MCU
+
+For displays whose ambient sensor is **not on the head unit's I2C bus at all**.
+On the OTS-OLED 17.3" driver board the panel's TI OPT5001 sits at `0x46` on the
+MCU's private bus, behind the deserializer, and no amount of pass-through
+reaches it. The MCU firmware (`display_manager` on `REMOTE_DISP_OTS`, v01.16 or
+later) samples it every 100 ms and publishes the result on its own I2C slave;
+this sensor type reads that published block.
+
+```json
+"sensor": { "type": "ioc_opt5001", "device": "/dev/i2c-1", "address": "0x66", "scale_factor": 1.0 }
+```
+
+One 12-byte read per cycle from register `0x1010` gives status, a sequence
+counter, the 32-bit light value, the raw mantissa/exponent, the sample age and
+an error count. The daemon consumes the light value and the `VALID` bit; the
+rest is for `disptool --device=ioc --command=als` and for the log line the
+sensor prints when a reading is refused.
+
+Three behaviours worth knowing:
+
+- **The value is not lux.** The sensor is behind the glass of a continuously
+  emitting OLED, so a reading is `k * panel_luminance + ambient` and tracks
+  on-screen content: black about 200 codes, launcher UI 300..400, full white
+  about 12000, external light adding roughly 700..1000. Keep `scale_factor` at
+  1.0 and express the zones in codes; see the comments in
+  `configs/config_ioc_opt5001_tcon_ots17.json` for how the edges are chosen so
+  content alone cannot walk the loop into the next zone.
+- **The panel domain powers the sensor.** With the display off, the block
+  reports `PANEL_ON = 0` and the sensor goes unhealthy with the reason logged
+  once ("panel off"), which routes into the usual
+  `sensor_error_timeout_sec` / `fallback_brightness` path. It recovers on its
+  own within two intervals once the panel is back.
+- **A stuck sampler is detected, not averaged over.** A frozen reading is
+  indistinguishable from perfectly steady light, so the sensor watches the
+  MCU's sequence counter and reports unhealthy if it has not moved across five
+  consecutive reads.
+
+Init fails, deliberately and with a message, if the MCU firmware has no sampler
+(the block reads `0xFF`) or if `PRIV_BUS = 0`, which means this board wires the
+sensor to the head unit's own bus -- use a direct `opti4001` sensor there
+instead.
 
 ### Brightness-to-nits calibration
 

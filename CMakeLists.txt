@@ -29,6 +29,7 @@ set(CORE_SOURCES
     src/sensors/fpga_opti4001_sensor.cpp
     src/sensors/fpga_opti4001_lux_sensor.cpp
     src/sensors/fpga_opti4001_sysfs_sensor.cpp
+    src/sensors/ioc_opt5001_sensor.cpp
     src/sensors/can_als_sensor.cpp
     src/outputs/file_output.cpp
     src/outputs/i2c_dimmer_output.cpp

@@ -56,6 +56,11 @@ Config Config::loadFromFile(const std::string& filename) {
         config.sensor.scale_factor = sensor_json["scale_factor"].get<float>();
     } else if (config.sensor.type == "fpga_opti4001_lux") {
         config.sensor.scale_factor = 1.0f;
+    } else if (config.sensor.type == "ioc_opt5001") {
+        // The IOC publishes raw ADC codes, and the OLED zones are expressed in
+        // those codes (no lux conversion anywhere on this path), so the default
+        // is a pass-through. See als-management-plan.md D5.2.
+        config.sensor.scale_factor = 1.0f;
     }
 
     // Parse output configuration
@@ -454,7 +459,7 @@ void Config::validate() const {
     }
 
     // Type-specific validation
-    if (sensor.type == "opti4001" || sensor.type == "veml7700" || sensor.type == "custom_i2c" || sensor.type == "fpga_opti4001" || sensor.type == "fpga_opti4001_lux") {
+    if (sensor.type == "opti4001" || sensor.type == "veml7700" || sensor.type == "custom_i2c" || sensor.type == "fpga_opti4001" || sensor.type == "fpga_opti4001_lux" || sensor.type == "ioc_opt5001") {
         if (sensor.device.empty()) {
             throw ConfigError("sensor.device is required for I2C sensor types");
         }

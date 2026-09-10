@@ -1,0 +1,72 @@
+{
+  "_comment_display": "OTS-OLED 17.3-inch panel behind a DS90UH983/DS90UB984 link and the ioc-deserializer MCU at 0x66. Both the sensor and the output talk to that one MCU: the panel's OPT5001 ambient sensor and its TCON sit on the MCU's private I2C bus and are not reachable from this Pi at all. Firmware v01.16 or later is required for the sensor (ALS block 0x1010-0x101B); the ioc_tcon output additionally needs the brightness relay at 0x0210-0x021A, and refuses to start without it rather than writing into reserved registers.",
+
+  "_comment_sensor": "lux_range values below are RAW ADC CODES, not lux -- scale_factor is 1.0 and there is no lux conversion anywhere on this path. The sensor sits behind the glass of a continuously emitting OLED, so a reading is k * panel_luminance + ambient: black about 200 codes, launcher UI 300..400, full white about 12000, with external light at the sensor adding roughly 700..1000 on top of either.",
+
+  "_comment_zones": "Zone edges follow the self-consistent zone rule of als-management-plan.md section 6.3: a zone's upper edge sits above the reading a full-white screen produces at that zone's own maximum brightness, so on-screen content alone can never push the loop into the next zone. Measured on the bench 2026-09-10: 30 % -> 237 nits -> 4002 codes; 70 % -> 534 nits -> 8587 codes; 100 % -> 752 nits -> 12170 codes. Hence 4500 and 9500, about 10 % of margin. The consequence is deliberate and accepted for v1: below a zone's ceiling the algorithm cannot tell a room-light change from a content change, so it follows large ambient changes (dark cabin versus daylight) and is insensitive to small ones. Bucket 6 re-measures and re-tunes these numbers before sign-off; this file ships as the starting point.",
+
+  "_comment_output": "value_range is the panel TCON's own scale for register 0x054C: 13 (0x000D, 5 nits) to 2047 (0x07FF, 800 nits), linear, about 0.37 nit per count on white. The daemon sends percent; the ioc_tcon output maps it onto that range and the MCU forwards the raw value to the TCON without scaling.",
+
+  "sensor": {
+    "type": "ioc_opt5001",
+    "device": "/dev/i2c-1",
+    "address": "0x66",
+    "scale_factor": 1.0
+  },
+  "output": {
+    "type": "ioc_tcon",
+    "device": "/dev/i2c-1",
+    "address": "0x66",
+    "value_range": [13, 2047]
+  },
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/tmp/als-dimmer-state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": false
+  },
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 4500],
+      "brightness_range": [5, 30],
+      "curve": "logarithmic",
+      "step_sizes": { "large": 3, "medium": 2, "small": 1 },
+      "error_thresholds": { "large": 30, "small": 12 }
+    },
+    {
+      "name": "indoor",
+      "lux_range": [4500, 9500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": { "large": 4, "medium": 2, "small": 1 },
+      "error_thresholds": { "large": 35, "small": 15 }
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [9500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": { "large": 5, "medium": 2, "small": 1 },
+      "error_thresholds": { "large": 40, "small": 20 }
+    }
+  ],
+  "calibration": {
+    "enabled": false
+  }
+}
