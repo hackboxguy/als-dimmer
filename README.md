@@ -343,7 +343,10 @@ Three behaviours worth knowing:
 - **A stuck sampler is detected, not averaged over.** A frozen reading is
   indistinguishable from perfectly steady light, so the sensor watches the
   MCU's sequence counter and reports unhealthy if it has not moved across five
-  consecutive reads.
+  consecutive reads. This check runs **only while the block reports `VALID`**:
+  a sampler that is parked for a reason it has already given -- panel off,
+  sensor absent, no SYNC -- is not stuck, and saying so twice under two
+  different names would make the second one wrong.
 
 Init fails, deliberately and with a message, if the MCU firmware has no sampler
 (the block reads `0xFF`) or if `PRIV_BUS = 0`, which means this board wires the

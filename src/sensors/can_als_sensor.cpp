@@ -8,6 +8,7 @@
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
+#include <cstdint>   // uint8_t/uint16_t below; not pulled in transitively by GCC 14+
 
 namespace als_dimmer {
 

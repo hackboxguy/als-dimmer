@@ -7,6 +7,7 @@
 #include <linux/i2c-dev.h>
 #include <cstring>
 #include <algorithm>
+#include <cstdint>   // uint8_t/uint16_t below; not pulled in transitively by GCC 14+
 
 namespace als_dimmer {
 

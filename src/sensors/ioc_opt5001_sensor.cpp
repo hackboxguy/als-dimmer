@@ -140,9 +140,24 @@ public:
                       << " errors " << (((uint32_t)block[10] << 8) | block[11]) << "\n";
         }
 
-        // A sampler that has stopped publishing looks exactly like a perfectly
-        // steady light level, so the sequence counter is what tells them apart.
-        // Five identical reads is 2.5 s at the default 500 ms interval, against
+        // The status bits decide first. A sampler that is deliberately parked
+        // -- panel off, sensor absent, no SYNC -- has a frozen sequence for a
+        // reason it has already told us, and reporting it a few seconds later
+        // as "stuck" as well would be two names for one fact, the second one
+        // wrong. So the stuck detector only ever speaks when the sampler
+        // claims to be running.
+        if ((status & kStatusValid) == 0) {
+            reportOnce(reasonFor(status), invalidMessage(status));
+            same_seq_count_ = 0;
+            have_last_seq_ = false;
+            healthy_ = false;
+            return -1.0f;
+        }
+
+        // VALID is set, so the IOC says this is a fresh sample from a running
+        // sampler. A sequence that does not move nevertheless is the one case
+        // a frozen reading is indistinguishable from perfectly steady light.
+        // Five identical reads is 2.5 s at the default 500 ms interval against
         // a sampler that should advance the sequence ten times a second.
         if (have_last_seq_ && seq == last_seq_) {
             same_seq_count_++;
@@ -153,14 +168,8 @@ public:
         have_last_seq_ = true;
 
         if (same_seq_count_ >= kStuckSeqReads) {
-            reportOnce(Reason::kStuck, "IOC sampler is stuck: ALS_SEQ unchanged over "
+            reportOnce(Reason::kStuck, "IOC sampler reports VALID but ALS_SEQ has not moved over "
                                        + std::to_string(kStuckSeqReads + 1) + " reads");
-            healthy_ = false;
-            return -1.0f;
-        }
-
-        if ((status & kStatusValid) == 0) {
-            reportOnce(reasonFor(status), invalidMessage(status));
             healthy_ = false;
             return -1.0f;
         }

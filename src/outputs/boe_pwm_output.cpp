@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#include <cstdint>   // uint8_t/uint16_t below; not pulled in transitively by GCC 14+
 
 namespace als_dimmer {
 
