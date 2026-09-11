@@ -47,7 +47,8 @@ public:
     IocOpt5001Sensor(const std::string& device, uint8_t address, float scale_factor)
         : device_(device), address_(address), scale_factor_(scale_factor),
           i2c_fd_(-1), healthy_(false), have_last_seq_(false), last_seq_(0),
-          same_seq_count_(0), last_reason_(Reason::kNone), debug_count_(0) {}
+          same_seq_count_(0), last_reason_(Reason::kNone), debug_count_(0),
+          have_last_good_(false), last_good_lux_(0.0f) {}
 
     ~IocOpt5001Sensor() override {
         if (i2c_fd_ >= 0) {
@@ -174,9 +175,52 @@ public:
             return -1.0f;
         }
 
+        // The firmware latches the whole block on the first byte read, so the
+        // three views of one sample -- codes, mantissa and exponent -- always
+        // agree in a block that arrived intact. codes is defined as
+        // mantissa << exponent, so if they disagree the read itself tore: the
+        // observed case is codes coming back 0xFFFFFFFF, which the definition
+        // cannot produce (its maximum is 0xFFFF << 7) and which the daemon used
+        // to consume as lux = 4.29e+09 and shove the loop toward outdoor.
+        // Checking the internal consistency rather than just the magnitude
+        // catches any partial read, not only the all-0xFF one.
+        const uint16_t mantissa = (uint16_t)(((uint16_t)block[6] << 8) | block[7]);
+        const uint8_t exponent = block[8];
+        const uint32_t expected = (uint32_t)mantissa << (exponent & 0x07);
+        if (codes != expected || codes > ((uint32_t)0xFFFF << 7)) {
+            reportOnce(Reason::kTorn, "torn ALS read (codes/mantissa disagree) -- discarded");
+            healthy_ = false;   // the controller holds; one torn read is not a level
+            return -1.0f;
+        }
+
+        // A railed sensor is not a bright environment. This one sits behind the
+        // glass of a panel that emits continuously, so saturation means glare or
+        // a transient at the sensor, not an ambient level worth acting on --
+        // with a lamp held close the reading went past 130000 codes against an
+        // outdoor edge of 9500 and the loop climbed to ~85% and then oscillated
+        // 85 -> 75 -> 65% as the sensor flipped in and out of saturation.
+        // Holding the last real measurement keeps the panel steady through a
+        // brief glare instead of lurching or tripping the daemon's
+        // sensor_error_timeout_sec fallback, and if the glare persists the held
+        // value simply stays, which for a behind-panel sensor is right: nothing
+        // about the actual ambient level has been learned.
+        const bool saturated = (status & kStatusSaturated) != 0 || mantissa == 0xFFFF;
+        if (saturated) {
+            reportOnce(Reason::kSaturated,
+                       "ALS saturated (sensor railed, likely glare) -- holding last reading");
+            if (have_last_good_) {
+                healthy_ = true;
+                return last_good_lux_;      // hold, do not climb
+            }
+            healthy_ = false;               // nothing good yet: let the controller fall back
+            return -1.0f;
+        }
+
         reportOnce(Reason::kOk, "reading valid again");
         healthy_ = true;
-        return static_cast<float>(codes) * scale_factor_;
+        last_good_lux_ = static_cast<float>(codes) * scale_factor_;
+        have_last_good_ = true;
+        return last_good_lux_;
     }
 
     bool isHealthy() const override {
@@ -201,7 +245,8 @@ private:
     static const uint8_t kStatusSaturated  = 0x20;
     static const uint8_t kStatusError      = 0x80;
 
-    enum class Reason { kNone, kOk, kPanelOff, kAbsent, kNoSync, kBusError, kStale, kStuck };
+    enum class Reason { kNone, kOk, kPanelOff, kAbsent, kNoSync, kBusError,
+                        kStale, kStuck, kTorn, kSaturated };
 
     void closeFd() {
         if (i2c_fd_ >= 0) {
@@ -285,7 +330,9 @@ private:
             return;
         }
         last_reason_ = reason;
-        if (reason == Reason::kOk) {
+        // kSaturated still returns a value (the held one), so the "no reading"
+        // prefix the failure reasons share would be wrong for it.
+        if (reason == Reason::kOk || reason == Reason::kSaturated) {
             std::cout << "[IOC_OPT5001] " << message << "\n";
         } else {
             std::cerr << "[IOC_OPT5001] no reading: " << message << "\n";
@@ -302,6 +349,8 @@ private:
     int same_seq_count_;
     Reason last_reason_;
     int debug_count_;
+    bool have_last_good_;
+    float last_good_lux_;
 };
 
 // Factory function
