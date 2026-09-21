@@ -10,10 +10,13 @@
     "scale_factor": 1.0
   },
 
+  "_comment_value_range": "value_range[1] is the FPGA global-dimming register's full-scale duty, NOT a percentage. The documented register is 0x000-0x800 (2048); this board's bitstream keeps responding linearly past it and 2800 measures 855.7 nits against 627 at 2048 (i1 Display Pro on the glass, full-white pattern, 2026-09-21). It wraps rather than clamping somewhere in 3216-3219, so do not raise this to 3210 or beyond -- near-black, not maximum, is what a value past the top produces. Re-confirm against the bitstream before changing.",
+
   "output": {
     "type": "dimmer2048",
     "device": "/dev/i2c-1",
-    "address": "0x1D"
+    "address": "0x1D",
+    "value_range": [0, 2800]
   },
 
   "control": {
