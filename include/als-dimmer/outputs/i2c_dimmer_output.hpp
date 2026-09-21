@@ -19,6 +19,20 @@ namespace als_dimmer {
  * - Common header: 0x00 0x00 0x00
  * - Command byte: 0x28 (dimmer200) or 0x35 (dimmer800/dimmer2048)
  * - Value bytes: 1 byte (dimmer200) or 2 bytes BE (dimmer800 BCD / dimmer2048 binary)
+ *
+ * DIMMER_800 and DIMMER_2048 are the same register reached two ways, and at
+ * 100% they put the SAME BYTES on the wire: BCD(800) and binary 2048 are both
+ * 0x08 0x00.  They diverge everywhere else -- at 10%, BCD(80) = 0x0080 = 128
+ * against binary 204 -- so which one is correct depends on what the FPGA
+ * decodes, and a measurement taken only at 100% cannot tell them apart.
+ * Measured on 12.3"-NQ1.1 (Lattice-25) 2026-09-21: it responds linearly to
+ * arbitrary binary values including 0x09C4 and 0x0C8F, whose low bytes are not
+ * valid BCD, so that board decodes BINARY and DIMMER_2048 is the right type
+ * for it.
+ *
+ * The native maximum is overridable per config via output.value_range[1],
+ * because the register is a raw PWM duty whose full scale is a property of the
+ * bitstream rather than of this driver.  See the constructor.
  */
 class I2CDimmerOutput : public OutputInterface {
 public:
@@ -34,8 +48,13 @@ public:
      * @param device I2C device path (e.g., "/dev/i2c-1")
      * @param address I2C slave address (e.g., 0x1D)
      * @param type Dimmer type (DIMMER_200, DIMMER_800, or DIMMER_2048)
+     * @param max_native Native full-scale value, or 0 to use the type's
+     *        default (200 / 800 / 2048).  Comes from output.value_range[1].
+     *        Rejected for DIMMER_200 and DIMMER_800 above their encodings'
+     *        limits -- see the constructor.
      */
-    I2CDimmerOutput(const std::string& device, uint8_t address, DimmerType type);
+    I2CDimmerOutput(const std::string& device, uint8_t address, DimmerType type,
+                    int max_native = 0);
     ~I2CDimmerOutput();
 
     bool init() override;
@@ -54,7 +73,7 @@ private:
     DimmerType type_;
     int fd_;
     int current_brightness_;  // Cached brightness (0-100)
-    int max_native_brightness_;  // 200, 800, or 2048
+    int max_native_brightness_;  // 200, 800, 2048, or an value_range[1] override
     uint8_t command_byte_;  // 0x28 or 0x35
 
     /**

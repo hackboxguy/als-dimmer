@@ -11,7 +11,8 @@
 
 namespace als_dimmer {
 
-I2CDimmerOutput::I2CDimmerOutput(const std::string& device, uint8_t address, DimmerType type)
+I2CDimmerOutput::I2CDimmerOutput(const std::string& device, uint8_t address, DimmerType type,
+                                 int max_native)
     : device_(device)
     , address_(address)
     , type_(type)
@@ -28,6 +29,40 @@ I2CDimmerOutput::I2CDimmerOutput(const std::string& device, uint8_t address, Dim
     } else {  // DIMMER_2048
         max_native_brightness_ = 2048;
         command_byte_ = 0x35;
+    }
+
+    // An explicit output.value_range[1] overrides the type default.  The
+    // register behind command 0x35 is a raw PWM duty compare value, and its
+    // full scale belongs to the FPGA bitstream, not to this driver: on
+    // 12.3"-NQ1.1 the documented range is 0x000-0x800 while the bitstream as
+    // measured keeps responding linearly to about 0x0C8F.  Rather than add a
+    // type per panel, take the number from the config the way ioc_tcon and
+    // fpga_sysfs_dimmer already do.
+    //
+    // Refuse what an encoding cannot express, instead of clamping silently:
+    // decimalToBCD16() saturates at 999, so a DIMMER_800 asked for more would
+    // quietly stop at 0x0999 and the panel would sit dimmer than the config
+    // says, with nothing to read in a log. DIMMER_200 sends one byte.
+    if (max_native > 0 && max_native != max_native_brightness_) {
+        int limit = 0;
+        if (type_ == DimmerType::DIMMER_200) {
+            limit = 255;
+        } else if (type_ == DimmerType::DIMMER_800) {
+            limit = 999;      // decimalToBCD16 cannot encode more
+        } else {
+            limit = 65535;    // 2-byte binary
+        }
+
+        if (max_native > limit) {
+            std::cerr << "[I2CDimmer]  value_range max " << max_native
+                      << " exceeds what " << getType() << " can encode (" << limit
+                      << "); keeping " << max_native_brightness_ << "\n";
+        } else {
+            std::cout << "[I2CDimmer]  native full scale overridden: "
+                      << max_native_brightness_ << " -> " << max_native
+                      << " (from output.value_range)\n";
+            max_native_brightness_ = max_native;
+        }
     }
 }
 
@@ -227,7 +262,8 @@ int I2CDimmerOutput::scaleToNative(int percent) const {
 // Factory function
 std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device,
                                                         uint8_t address,
-                                                        const std::string& type) {
+                                                        const std::string& type,
+                                                        int max_native) {
     I2CDimmerOutput::DimmerType dimmer_type;
 
     if (type == "dimmer200") {
@@ -241,7 +277,7 @@ std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device
         return nullptr;
     }
 
-    return std::make_unique<I2CDimmerOutput>(device, address, dimmer_type);
+    return std::make_unique<I2CDimmerOutput>(device, address, dimmer_type, max_native);
 }
 
 } // namespace als_dimmer

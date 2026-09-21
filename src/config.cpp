@@ -93,6 +93,15 @@ Config Config::loadFromFile(const std::string& filename) {
         // to 2047 (0x07FF, 800 nits). The generic [0, 100] default would be
         // both wrong and, with a floor of 0, below what the TCON accepts.
         config.output.value_range = { 13, 2047 };
+    } else if (config.output.type == "dimmer200") {
+        config.output.value_range = { 0, 200 };
+    } else if (config.output.type == "dimmer800") {
+        config.output.value_range = { 0, 800 };
+    } else if (config.output.type == "dimmer2048") {
+        // The FPGA global-dimming register behind command 0x35. 0x800 = 2048
+        // is the documented full scale; a panel whose bitstream differs sets
+        // its own value_range rather than needing a new output type.
+        config.output.value_range = { 0, 2048 };
     }
     if (output_json.contains("internal_range")) {
         config.output.internal_range = output_json["internal_range"].get<std::vector<int>>();
@@ -556,6 +565,27 @@ void Config::validate() const {
             output.value_range[0] >= output.value_range[1] ||
             output.value_range[1] > 65535) {
             throw ConfigError("output.value_range must be [min, max] with 0 <= min < max <= 65535 for ioc_tcon output type (default [13, 2047])");
+        }
+    } else if (output.type == "dimmer200" || output.type == "dimmer800" ||
+               output.type == "dimmer2048") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for " + output.type +
+                              " output type (the I2C bus, e.g. /dev/i2c-1)");
+        }
+        if (output.address.empty()) {
+            throw ConfigError("output.address is required for " + output.type +
+                              " output type (the dimmer slave, e.g. 0x1D)");
+        }
+        // Only the maximum is configurable. These types scale 0-100% onto
+        // 0..max and have never had a floor, so a non-zero minimum would be
+        // silently ignored -- reject it rather than appear to honour it.
+        if (output.value_range.size() != 2 ||
+            output.value_range[0] != 0 ||
+            output.value_range[1] <= 0 ||
+            output.value_range[1] > 65535) {
+            throw ConfigError("output.value_range must be [0, max] with 0 < max <= 65535 for " +
+                              output.type + " output type (defaults: dimmer200 [0,200], "
+                              "dimmer800 [0,800], dimmer2048 [0,2048])");
         }
     } else if (output.type == "i2c_pwm") {
         if (output.device.empty()) {

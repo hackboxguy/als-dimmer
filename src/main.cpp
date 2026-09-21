@@ -174,7 +174,8 @@ std::unique_ptr<OutputInterface> createDDCUtilOutput(int display_number);
 #endif
 std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device,
                                                         uint8_t address,
-                                                        const std::string& type);
+                                                        const std::string& type,
+                                                        int max_native);
 std::unique_ptr<OutputInterface> createFPGASysfsOutput(const std::string& sysfs_path, int max_value);
 std::unique_ptr<OutputInterface> createIocTconOutput(const std::string& device, const std::string& address, int range_lo, int range_hi);
 std::unique_ptr<OutputInterface> createBoePwmOutput(const std::string& i2c_device,
@@ -245,7 +246,8 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
     else if (config.output.type == "dimmer200" || config.output.type == "dimmer800" || config.output.type == "dimmer2048") {
         // Parse I2C address from hex string (e.g., "0x1D" -> 0x1D)
         uint8_t address = static_cast<uint8_t>(std::stoul(config.output.address, nullptr, 16));
-        return als_dimmer::createI2CDimmerOutput(config.output.device, address, config.output.type);
+        return als_dimmer::createI2CDimmerOutput(config.output.device, address, config.output.type,
+                                                config.output.value_range[1]);
     }
     else if (config.output.type == "ioc_tcon") {
         return als_dimmer::createIocTconOutput(
