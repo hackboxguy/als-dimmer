@@ -8,6 +8,9 @@
 #include <sys/stat.h>
 #include <libgen.h>
 #include <cstring>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
 
 using json = nlohmann::json;
 
@@ -86,14 +89,33 @@ bool StateManager::save() {
     j["brightness_offset"] = state_.brightness_offset;
     j["last_updated"] = state_.last_updated;
 
-    // Write to file
-    std::ofstream file(file_path_);
-    if (!file.is_open()) {
-        LOG_ERROR("StateManager", "Cannot write to state file: " << file_path_);
+    // Write atomically: a power cut while writing the file in place could leave it
+    // empty or cut short, and load() then falls back to defaults (AUTO mode), losing
+    // the user's manual brightness. So write a temporary file beside it, flush it to
+    // disk, rename it over the old one and flush the directory entry.
+    const std::string tmp_path = file_path_ + ".tmp";
+    const std::string content = j.dump(2) + "\n";
+    int fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        LOG_ERROR("StateManager", "Cannot write to state file: " << tmp_path << ": " << strerror(errno));
         return false;
     }
+    bool ok = write(fd, content.data(), content.size()) == static_cast<ssize_t>(content.size());
+    ok = (fsync(fd) == 0) && ok;
+    ok = (close(fd) == 0) && ok;
+    if (!ok || rename(tmp_path.c_str(), file_path_.c_str()) != 0) {
+        LOG_ERROR("StateManager", "Cannot write state file " << file_path_ << ": " << strerror(errno));
+        unlink(tmp_path.c_str());
+        return false;
+    }
+    char* dir_copy = strdup(file_path_.c_str());
+    int dir_fd = open(dirname(dir_copy), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    free(dir_copy);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
 
-    file << j.dump(2) << "\n";
     dirty_ = false;
     last_save_time_ = std::chrono::steady_clock::now();
 
