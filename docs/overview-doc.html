@@ -1,0 +1,1099 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALS-Dimmer Overview</title>
+<meta name="description" content="Overview, plugin architecture, algorithms, configuration and porting guide for the als-dimmer display brightness daemon. Written in ASD-STE100 style.">
+<style>
+:root {
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --surface-2: #f3f1ec;
+  --text: #1f2328;
+  --muted: #5b6370;
+  --border: #dedad2;
+  --accent: #1d5fa8;
+  --accent-soft: #e4eef9;
+  --z1: #3d4f9f;
+  --z2: #2f8a6b;
+  --z3: #c7811d;
+  --warn-bg: #fdecea; --warn-bd: #c0392b; --warn-tx: #7d1f15;
+  --caut-bg: #fff5e0; --caut-bd: #c98a12; --caut-tx: #6b4a06;
+  --note-bg: #eaf2fb; --note-bd: #1d5fa8; --note-tx: #163f6e;
+  --code-bg: #f3f1ec;
+  --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --surface: #1c1f24; --surface-2: #23272e; --text: #e6e8eb; --muted: #9aa3ae;
+    --border: #333943; --accent: #6aa6ea; --accent-soft: #1d2a3a;
+    --z1: #8b9cf0; --z2: #5cc8a1; --z3: #f0b04f;
+    --warn-bg: #3a1d1a; --warn-bd: #e0675a; --warn-tx: #f6c7c1;
+    --caut-bg: #352a12; --caut-bd: #e0a83a; --caut-tx: #f3dcab;
+    --note-bg: #182638; --note-bd: #6aa6ea; --note-tx: #cfe1f7;
+    --code-bg: #23272e;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --surface: #1c1f24; --surface-2: #23272e; --text: #e6e8eb; --muted: #9aa3ae;
+  --border: #333943; --accent: #6aa6ea; --accent-soft: #1d2a3a;
+  --z1: #8b9cf0; --z2: #5cc8a1; --z3: #f0b04f;
+  --warn-bg: #3a1d1a; --warn-bd: #e0675a; --warn-tx: #f6c7c1;
+  --caut-bg: #352a12; --caut-bd: #e0a83a; --caut-tx: #f3dcab;
+  --note-bg: #182638; --note-bd: #6aa6ea; --note-tx: #cfe1f7;
+  --code-bg: #23272e;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+.layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+nav.toc {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 28px 18px 28px 24px; border-right: 1px solid var(--border); font-size: 14px;
+}
+nav.toc .brand { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+nav.toc .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 18px; }
+nav.toc ol { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+nav.toc li { margin: 2px 0; }
+nav.toc a { color: var(--muted); text-decoration: none; display: block; padding: 3px 8px; border-radius: 6px; }
+nav.toc a:hover { color: var(--text); background: var(--surface-2); }
+nav.toc a.active { color: var(--accent); background: var(--accent-soft); }
+nav.toc ol ol { padding-left: 12px; font-size: 13px; }
+.theme-btn {
+  margin-top: 18px; font: inherit; font-size: 12.5px; color: var(--muted); background: transparent;
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+main { padding: 32px 48px 80px; min-width: 0; }
+header.doc { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 8px; }
+header.doc h1 { font-size: 34px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+header.doc p.lead { font-size: 18px; color: var(--muted); margin: 0 0 14px; max-width: 760px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.meta span { background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; color: var(--muted); }
+h2 { font-size: 25px; margin: 56px 0 12px; padding-top: 8px; letter-spacing: -0.005em; scroll-margin-top: 16px; }
+h3 { font-size: 19px; margin: 34px 0 8px; scroll-margin-top: 16px; }
+h4 { font-size: 16px; margin: 24px 0 6px; }
+h2 .num, h3 .num { color: var(--accent); margin-right: 8px; font-variant-numeric: tabular-nums; }
+p, li { max-width: 78ch; }
+a { color: var(--accent); }
+code, pre, kbd { font-family: var(--mono); font-size: 0.88em; }
+:not(pre) > code { background: var(--code-bg); border: 1px solid var(--border); padding: 0 5px; border-radius: 4px; word-break: break-word; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; line-height: 1.45; }
+pre .c { color: var(--muted); }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 18px; font-size: 14.5px; }
+.tbl { overflow-x: auto; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+td code { white-space: nowrap; }
+.callout { border-left: 4px solid; border-radius: 6px; padding: 10px 14px; margin: 14px 0; max-width: 82ch; }
+.callout b.lbl { display: block; letter-spacing: 0.06em; font-size: 12.5px; margin-bottom: 2px; }
+.callout p { margin: 4px 0; }
+.warning { background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn-tx); }
+.caution { background: var(--caut-bg); border-color: var(--caut-bd); color: var(--caut-tx); }
+.note { background: var(--note-bg); border-color: var(--note-bd); color: var(--note-tx); }
+.callout code { background: transparent; border-color: currentColor; opacity: 0.95; }
+ol.steps { padding-left: 0; list-style: none; counter-reset: st; }
+ol.steps > li { counter-increment: st; position: relative; padding-left: 40px; margin: 10px 0; }
+ol.steps > li::before {
+  content: counter(st); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+figure { margin: 18px 0 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { color: var(--muted); font-size: 13.5px; margin-top: 10px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.card h4 { margin-top: 0; }
+.zone-chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+.svg-text { fill: var(--text); font: 13px var(--sans); }
+.svg-muted { fill: var(--muted); font: 12px var(--sans); }
+.svg-box { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.2; }
+.svg-core { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+.svg-line { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.svg-acc { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+.svg-grid { stroke: var(--border); stroke-width: 1; }
+.calc { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin: 8px 0 12px; }
+.calc label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.calc input { font: 15px var(--sans); width: 130px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.calc-out { font-size: 14.5px; }
+.calc-out b { font-variant-numeric: tabular-nums; }
+.seq { font-family: var(--mono); font-size: 13px; color: var(--muted); word-break: break-word; }
+.mobile-toc { display: none; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  nav.toc { display: none; }
+  main { padding: 20px 16px 60px; }
+  header.doc h1 { font-size: 27px; }
+  .grid2 { grid-template-columns: 1fr; }
+  .mobile-toc { display: block; margin: 14px 0; }
+  .mobile-toc details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  .mobile-toc ol { padding-left: 20px; margin: 8px 0; }
+}
+@media print {
+  nav.toc, .theme-btn, .mobile-toc, .calc { display: none; }
+  .layout { display: block; }
+  main { padding: 0; }
+  h2 { break-before: page; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc" aria-label="Contents">
+  <div class="brand">ALS-Dimmer</div>
+  <div class="sub">Overview and porting guide</div>
+  <ol id="toc-list">
+    <li><a href="#about">1 About this document</a></li>
+    <li><a href="#summary">2 System summary</a></li>
+    <li><a href="#terms">3 Terms</a></li>
+    <li><a href="#arch">4 Architecture</a></li>
+    <li><a href="#plugins">5 Plugin architecture</a></li>
+    <li><a href="#algo">6 Algorithms</a>
+      <ol>
+        <li><a href="#zones">6.1 Three zones</a></li>
+        <li><a href="#curves">6.2 Curves</a></li>
+        <li><a href="#hyst">6.3 Hysteresis</a></li>
+        <li><a href="#ramp">6.4 Smooth ramp</a></li>
+        <li><a href="#modes">6.5 Operating modes</a></li>
+        <li><a href="#watchdog">6.6 Sensor watchdog</a></li>
+        <li><a href="#nits">6.7 Nits and thermal</a></li>
+      </ol>
+    </li>
+    <li><a href="#control">7 Control interface</a></li>
+    <li><a href="#config">8 Configuration</a></li>
+    <li><a href="#tuning">9 Zone tuning</a></li>
+    <li><a href="#linux">10 Use on Linux</a></li>
+    <li><a href="#android">11 Port to Android</a></li>
+    <li><a href="#qnx">12 Port to QNX</a></li>
+    <li><a href="#limits">13 Known behaviors</a></li>
+    <li><a href="#files">14 Source file map</a></li>
+  </ol>
+  <button class="theme-btn" id="theme-btn" type="button">Theme: auto</button>
+</nav>
+
+<main>
+<header class="doc">
+  <h1>ALS-Dimmer: overview, algorithms and porting guide</h1>
+  <p class="lead">ALS-Dimmer is a background daemon. It reads an ambient light sensor (ALS) and sets the brightness of a remote automotive display. This document tells you how the daemon operates, how to configure it, and how to move it to a different head unit.</p>
+  <div class="meta">
+    <span>Repository: als-dimmer</span>
+    <span>Language: C++14</span>
+    <span>Target: Linux (Android and QNX by port)</span>
+    <span>Style: ASD-STE100 (approximate)</span>
+  </div>
+  <div class="mobile-toc">
+    <details><summary>Contents</summary><ol id="toc-mobile"></ol></details>
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<h2 id="about"><span class="num">1</span>About this document</h2>
+
+<h3>1.1 Purpose</h3>
+<p>This document gives head-unit engineers the data that they need to:</p>
+<ul>
+  <li>Install and use als-dimmer on a Linux head unit without code changes.</li>
+  <li>Change the JSON configuration for a different sensor, display or vehicle.</li>
+  <li>Add a new sensor plugin or a new output plugin.</li>
+  <li>Port the code to Android or to QNX.</li>
+</ul>
+
+<h3>1.2 Readers</h3>
+<p>The readers are software engineers who work on infotainment head units. You must know C++, Linux processes, and I2C. You do not have to know the history of this project.</p>
+
+<h3>1.3 Writing rules</h3>
+<p>This document follows the rules of ASD-STE100 Simplified Technical English as much as possible. Thus:</p>
+<ul>
+  <li>Sentences are short. Procedural sentences have a maximum of 20 words.</li>
+  <li>Procedures use numbered steps. Each step has one instruction.</li>
+  <li>A <b>WARNING</b> tells you about a risk to persons, for example a driver who cannot see the road. A <b>CAUTION</b> tells you about a risk to equipment or data. A <b>NOTE</b> gives more data.</li>
+  <li>Code names, file names and JSON keys are in <code>monospace</code>. They are technical names and do not obey the STE word rules.</li>
+</ul>
+
+<h3>1.4 Source of truth</h3>
+<p>This document describes the code at the time of writing. If the code and this document do not agree, the code is correct. The file <code>README.md</code> contains more data about calibration tools and specific display hardware.</p>
+
+<!-- ============================================================ -->
+<h2 id="summary"><span class="num">2</span>System summary</h2>
+
+<p>The daemon runs a control loop. The loop period is <code>update_interval_ms</code> (default 500&nbsp;ms). In each cycle, the daemon does these tasks:</p>
+<ol>
+  <li>It reads the ambient light value from the sensor plugin.</li>
+  <li>It finds the applicable <b>zone</b> (for example night, tunnel or daylight).</li>
+  <li>It calculates a <b>target brightness</b> (0 to 100&nbsp;%) from the zone curve.</li>
+  <li>It moves the display brightness one small step toward the target.</li>
+  <li>It writes the new value to the output plugin.</li>
+</ol>
+<p>A user or an HMI application can stop the automatic control. The daemon supports three operating modes:</p>
+<div class="tbl"><table>
+  <tr><th>Mode</th><th>Behavior</th><th>Persistent after restart</th></tr>
+  <tr><td><code>auto</code></td><td>The sensor value controls the brightness.</td><td>Yes</td></tr>
+  <tr><td><code>manual_temporary</code></td><td>The user value controls the brightness. After a timeout (default 60&nbsp;s), the daemon goes back to <code>auto</code>.</td><td>No. The daemon starts in <code>auto</code>.</td></tr>
+  <tr><td><code>manual</code></td><td>The user value controls the brightness until the user selects <code>auto</code> again.</td><td>Yes</td></tr>
+</table></div>
+
+<figure>
+<svg viewBox="0 0 860 330" role="img" aria-label="System context diagram">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/></marker>
+  </defs>
+  <!-- sensor -->
+  <rect class="svg-box" x="10" y="40" width="150" height="70" rx="8"/>
+  <text class="svg-text" x="85" y="70" text-anchor="middle">Ambient light</text>
+  <text class="svg-text" x="85" y="88" text-anchor="middle">sensor (ALS)</text>
+  <text class="svg-muted" x="85" y="128" text-anchor="middle">I2C, FPGA, MCU, CAN</text>
+  <!-- core -->
+  <rect class="svg-core" x="220" y="20" width="420" height="190" rx="10"/>
+  <text class="svg-text" x="430" y="44" text-anchor="middle" font-weight="700">als-dimmer daemon</text>
+  <rect class="svg-box" x="236" y="60" width="90" height="56" rx="6"/>
+  <text class="svg-text" x="281" y="84" text-anchor="middle">Sensor</text>
+  <text class="svg-text" x="281" y="101" text-anchor="middle">plugin</text>
+  <rect class="svg-box" x="342" y="60" width="80" height="56" rx="6"/>
+  <text class="svg-text" x="382" y="84" text-anchor="middle">Zone</text>
+  <text class="svg-text" x="382" y="101" text-anchor="middle">mapper</text>
+  <rect class="svg-box" x="438" y="60" width="80" height="56" rx="6"/>
+  <text class="svg-text" x="478" y="84" text-anchor="middle">Ramp</text>
+  <text class="svg-text" x="478" y="101" text-anchor="middle">control</text>
+  <rect class="svg-box" x="534" y="60" width="90" height="56" rx="6"/>
+  <text class="svg-text" x="579" y="84" text-anchor="middle">Output</text>
+  <text class="svg-text" x="579" y="101" text-anchor="middle">plugin</text>
+  <line class="svg-line" x1="326" y1="88" x2="340" y2="88" marker-end="url(#ar)"/>
+  <line class="svg-line" x1="422" y1="88" x2="436" y2="88" marker-end="url(#ar)"/>
+  <line class="svg-line" x1="518" y1="88" x2="532" y2="88" marker-end="url(#ar)"/>
+  <rect class="svg-box" x="236" y="134" width="180" height="56" rx="6"/>
+  <text class="svg-text" x="326" y="158" text-anchor="middle">Mode state machine</text>
+  <text class="svg-muted" x="326" y="176" text-anchor="middle">auto / manual_temp / manual</text>
+  <rect class="svg-box" x="432" y="134" width="192" height="56" rx="6"/>
+  <text class="svg-text" x="528" y="158" text-anchor="middle">Control interface</text>
+  <text class="svg-muted" x="528" y="176" text-anchor="middle">TCP :9000 + Unix socket</text>
+  <!-- display -->
+  <rect class="svg-box" x="700" y="40" width="150" height="70" rx="8"/>
+  <text class="svg-text" x="775" y="70" text-anchor="middle">Remote display</text>
+  <text class="svg-text" x="775" y="88" text-anchor="middle">backlight / TCON</text>
+  <text class="svg-muted" x="775" y="128" text-anchor="middle">I2C, PWM, DDC/CI, sysfs</text>
+  <line class="svg-line" x1="160" y1="75" x2="234" y2="85" marker-end="url(#ar)"/>
+  <line class="svg-line" x1="624" y1="85" x2="698" y2="75" marker-end="url(#ar)"/>
+  <!-- clients -->
+  <rect class="svg-box" x="432" y="250" width="192" height="60" rx="8"/>
+  <text class="svg-text" x="528" y="275" text-anchor="middle">HMI app / slider /</text>
+  <text class="svg-text" x="528" y="293" text-anchor="middle">als-dimmer-client</text>
+  <line class="svg-line" x1="528" y1="248" x2="528" y2="192" marker-end="url(#ar)" marker-start="url(#ar)"/>
+  <text class="svg-muted" x="540" y="228">JSON commands</text>
+  <!-- state + notifier -->
+  <rect class="svg-box" x="236" y="250" width="180" height="60" rx="8"/>
+  <text class="svg-text" x="326" y="275" text-anchor="middle">State file (JSON)</text>
+  <text class="svg-muted" x="326" y="293" text-anchor="middle">mode + manual value</text>
+  <line class="svg-line" x1="326" y1="192" x2="326" y2="248" marker-end="url(#ar)"/>
+  <rect class="svg-box" x="700" y="250" width="150" height="60" rx="8"/>
+  <text class="svg-text" x="775" y="275" text-anchor="middle">Notify script</text>
+  <text class="svg-muted" x="775" y="293" text-anchor="middle">optional callback</text>
+  <path class="svg-line" d="M624,170 L775,170 L775,248" marker-end="url(#ar)"/>
+</svg>
+<figcaption>Figure 1. System context. The core has no hardware code. Plugins contain all hardware access.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="terms"><span class="num">3</span>Terms</h2>
+<div class="tbl"><table>
+  <tr><th>Term</th><th>Meaning in this document</th></tr>
+  <tr><td>ALS</td><td>Ambient light sensor. It measures the light around the display.</td></tr>
+  <tr><td>lux</td><td>The unit of the sensor value. Some sensors give raw codes, not lux. The algorithm uses the number as it is (see <a href="#tuning">section 9</a>).</td></tr>
+  <tr><td>brightness</td><td>The display brightness in percent, 0 to 100. The output plugin changes this value into the hardware unit.</td></tr>
+  <tr><td>target brightness</td><td>The brightness that the zone curve calculates for the current lux value.</td></tr>
+  <tr><td>zone</td><td>A lux range with its own brightness range, curve and step sizes.</td></tr>
+  <tr><td>step</td><td>The brightness change in one control cycle.</td></tr>
+  <tr><td>error</td><td>Target brightness minus current brightness.</td></tr>
+  <tr><td>plugin</td><td>A C++ class that implements <code>SensorInterface</code> or <code>OutputInterface</code>.</td></tr>
+  <tr><td>nits</td><td>Absolute luminance, cd/m². Used only by the optional calibration table.</td></tr>
+  <tr><td>LUT</td><td>Look-up table. Here, a CSV file that gives nits for each brightness percent.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="arch"><span class="num">4</span>Architecture</h2>
+
+<h3>4.1 Components</h3>
+<div class="tbl"><table>
+  <tr><th>Component</th><th>File</th><th>Function</th></tr>
+  <tr><td>Main loop</td><td><code>src/main.cpp</code></td><td>Starts all components. Runs the control loop. Processes the JSON commands. Contains the plugin factories.</td></tr>
+  <tr><td>Config</td><td><code>src/config.cpp</code></td><td>Reads the JSON file. Sets default values. Stops the start if a value is not valid.</td></tr>
+  <tr><td>ZoneMapper</td><td><code>src/zone_mapper.cpp</code></td><td>Selects the zone (with hysteresis). Calculates the target brightness.</td></tr>
+  <tr><td>BrightnessController</td><td><code>src/brightness_controller.cpp</code></td><td>Calculates the next brightness step toward the target.</td></tr>
+  <tr><td>StateManager</td><td><code>src/state_manager.cpp</code></td><td>Keeps the mode and the manual brightness in a JSON file. Writes the file atomically.</td></tr>
+  <tr><td>ControlInterface</td><td><code>src/control_interface.cpp</code></td><td>Listens on TCP and on a Unix socket. Puts the received commands in a queue.</td></tr>
+  <tr><td>Notifier</td><td><code>src/notifier.cpp</code></td><td>Starts an external script when the mode, brightness or zone changes.</td></tr>
+  <tr><td>BrightnessToNitsLut</td><td><code>src/brightness_to_nits_lut.cpp</code></td><td>Optional. Changes percent into nits and nits into percent.</td></tr>
+  <tr><td>ThermalCompensation</td><td><code>src/thermal_compensation.cpp</code></td><td>Optional. Corrects the nits value for the backlight temperature.</td></tr>
+  <tr><td>Sensor plugins</td><td><code>src/sensors/*.cpp</code></td><td>Read the light value from the hardware.</td></tr>
+  <tr><td>Output plugins</td><td><code>src/outputs/*.cpp</code></td><td>Write the brightness to the hardware.</td></tr>
+</table></div>
+
+<h3>4.2 Threads</h3>
+<p>The daemon uses few threads. Only the main thread changes the state and the hardware. Thus, the core does not need locks.</p>
+<ul>
+  <li><b>Main thread.</b> Runs the control loop. Reads the sensor. Writes the output. Executes all commands.</li>
+  <li><b>Accept threads (one for TCP, one for Unix).</b> Accept connections. Each accept thread starts one client thread for each connection.</li>
+  <li><b>Client threads.</b> Read text lines and put them in the command queue. They do not execute commands.</li>
+  <li><b>Thermal poll thread.</b> Only when thermal compensation is on. Reads the temperature every <code>poll_interval_sec</code>.</li>
+</ul>
+<div class="callout note"><b class="lbl">NOTE</b><p>The main thread executes the commands at the start of each cycle. Thus, a command can wait for a maximum of one loop period (500&nbsp;ms by default) before it has an effect.</p></div>
+
+<h3>4.3 One control cycle</h3>
+<figure>
+<svg viewBox="0 0 860 260" role="img" aria-label="Control cycle flow">
+  <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/></marker></defs>
+  <g>
+    <rect class="svg-box" x="10" y="20" width="150" height="70" rx="8"/>
+    <text class="svg-text" x="85" y="45" text-anchor="middle">1. Execute queued</text>
+    <text class="svg-text" x="85" y="63" text-anchor="middle">JSON commands</text>
+    <rect class="svg-box" x="185" y="20" width="150" height="70" rx="8"/>
+    <text class="svg-text" x="260" y="45" text-anchor="middle">2. Temporary mode</text>
+    <text class="svg-text" x="260" y="63" text-anchor="middle">timeout? → auto</text>
+    <rect class="svg-box" x="360" y="20" width="150" height="70" rx="8"/>
+    <text class="svg-text" x="435" y="45" text-anchor="middle">3. Read sensor</text>
+    <text class="svg-text" x="435" y="63" text-anchor="middle">+ watchdog</text>
+    <rect class="svg-core" x="535" y="20" width="150" height="70" rx="8"/>
+    <text class="svg-text" x="610" y="45" text-anchor="middle">4a. AUTO: zone →</text>
+    <text class="svg-text" x="610" y="63" text-anchor="middle">target → one step</text>
+    <rect class="svg-box" x="535" y="120" width="150" height="70" rx="8"/>
+    <text class="svg-text" x="610" y="145" text-anchor="middle">4b. MANUAL: write</text>
+    <text class="svg-text" x="610" y="163" text-anchor="middle">manual value</text>
+    <rect class="svg-box" x="710" y="20" width="140" height="70" rx="8"/>
+    <text class="svg-text" x="780" y="45" text-anchor="middle">5. Write output,</text>
+    <text class="svg-text" x="780" y="63" text-anchor="middle">notify</text>
+    <rect class="svg-box" x="710" y="120" width="140" height="70" rx="8"/>
+    <text class="svg-text" x="780" y="145" text-anchor="middle">6. Save state</text>
+    <text class="svg-text" x="780" y="163" text-anchor="middle">if changed</text>
+    <line class="svg-line" x1="160" y1="55" x2="183" y2="55" marker-end="url(#ar2)"/>
+    <line class="svg-line" x1="335" y1="55" x2="358" y2="55" marker-end="url(#ar2)"/>
+    <line class="svg-line" x1="510" y1="55" x2="533" y2="55" marker-end="url(#ar2)"/>
+    <path class="svg-line" d="M520,55 L520,155 L533,155" marker-end="url(#ar2)"/>
+    <line class="svg-line" x1="685" y1="55" x2="708" y2="55" marker-end="url(#ar2)"/>
+    <line class="svg-line" x1="685" y1="155" x2="708" y2="155" marker-end="url(#ar2)"/>
+    <line class="svg-line" x1="780" y1="90" x2="780" y2="118" marker-end="url(#ar2)"/>
+    <path class="svg-acc" d="M780,190 L780,230 L85,230 L85,92" marker-end="url(#ar2)"/>
+    <text class="svg-muted" x="430" y="222" text-anchor="middle">sleep update_interval_ms (default 500 ms), then repeat</text>
+  </g>
+</svg>
+<figcaption>Figure 2. One cycle of the main loop in <code>src/main.cpp</code>.</figcaption>
+</figure>
+
+<h3>4.4 Start sequence</h3>
+<ol class="steps">
+  <li>The daemon reads the configuration file. If a value is not valid, the daemon stops with an error message.</li>
+  <li>The daemon makes the ZoneMapper and the BrightnessController.</li>
+  <li>The daemon reads the state file. If the file is missing, it uses defaults (<code>auto</code>, 50&nbsp;%).</li>
+  <li>The daemon makes the sensor plugin and calls <code>init()</code>. If this fails, it installs a <code>NullSensor</code> and sets <code>manual</code> mode.</li>
+  <li>The daemon makes the output plugin and calls <code>init()</code>. If this fails, the daemon stops.</li>
+  <li>The daemon restores the white point (FPGA displays only), loads the optional nits LUT and starts optional thermal compensation.</li>
+  <li>The daemon opens the TCP socket and the Unix socket.</li>
+  <li>If the saved mode is <code>manual</code>, the daemon writes the saved manual brightness. If the saved mode is <code>manual_temporary</code>, the daemon changes it to <code>auto</code>.</li>
+  <li>The daemon starts the control loop.</li>
+</ol>
+<div class="callout note"><b class="lbl">NOTE</b><p>A failed sensor does not stop the daemon. A failed output stops the daemon. The display must stay controllable, but the daemon has no function without an output.</p></div>
+
+<!-- ============================================================ -->
+<h2 id="plugins"><span class="num">5</span>Plugin architecture</h2>
+
+<h3>5.1 The two interfaces</h3>
+<p>The core uses only two abstract C++ classes. They are in <code>include/als-dimmer/interfaces.hpp</code>.</p>
+<div class="grid2">
+<div class="card">
+<h4>SensorInterface</h4>
+<pre>class SensorInterface {
+public:
+  virtual bool  init() = 0;
+  virtual float readLux() = 0;   // &lt; 0 = error
+  virtual bool  isHealthy() const = 0;
+  virtual std::string getType() const = 0;
+};</pre>
+<ul>
+  <li><code>init()</code>: open and configure the device. Return <code>false</code> on failure.</li>
+  <li><code>readLux()</code>: return the light value. Return a negative value on error.</li>
+  <li><code>isHealthy()</code>: return <code>false</code> when the last reads failed. The watchdog uses this.</li>
+</ul>
+</div>
+<div class="card">
+<h4>OutputInterface</h4>
+<pre>class OutputInterface {
+public:
+  virtual bool init() = 0;
+  virtual bool setBrightness(int pct) = 0;  // 0..100
+  virtual int  getCurrentBrightness() = 0;  // 0..100
+  virtual std::string getType() const = 0;
+  virtual bool setWhitePoint(int, int, int); // optional
+};</pre>
+<ul>
+  <li><code>setBrightness()</code>: change 0..100&nbsp;% into the hardware range and write it.</li>
+  <li><code>getCurrentBrightness()</code>: return the last value in percent. The ramp starts from this value.</li>
+  <li><code>setWhitePoint()</code>: only FPGA dimmers use it. The default returns <code>false</code>.</li>
+</ul>
+</div>
+</div>
+
+<h3>5.2 How the core selects a plugin</h3>
+<p>The selection is static. Each plugin <code>.cpp</code> file contains the class and a free factory function, for example <code>createFileSensor()</code>. The functions <code>createSensor()</code> and <code>createOutput()</code> in <code>src/main.cpp</code> compare <code>sensor.type</code> or <code>output.type</code> from the JSON file and call the applicable factory. There is no run-time library load (<code>dlopen</code>). Thus, the port to other operating systems is easy.</p>
+
+<figure>
+<svg viewBox="0 0 860 240" role="img" aria-label="Plugin selection diagram">
+  <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/></marker></defs>
+  <rect class="svg-box" x="10" y="80" width="170" height="80" rx="8"/>
+  <text class="svg-text" x="95" y="108" text-anchor="middle">config.json</text>
+  <text class="svg-muted" x="95" y="128" text-anchor="middle">"sensor": {"type": "…"}</text>
+  <text class="svg-muted" x="95" y="146" text-anchor="middle">"output": {"type": "…"}</text>
+  <rect class="svg-core" x="230" y="80" width="190" height="80" rx="8"/>
+  <text class="svg-text" x="325" y="108" text-anchor="middle">createSensor()</text>
+  <text class="svg-text" x="325" y="128" text-anchor="middle">createOutput()</text>
+  <text class="svg-muted" x="325" y="148" text-anchor="middle">src/main.cpp</text>
+  <line class="svg-line" x1="180" y1="120" x2="228" y2="120" marker-end="url(#ar3)"/>
+  <rect class="svg-box" x="480" y="14" width="370" height="100" rx="8"/>
+  <text class="svg-text" x="495" y="38" font-weight="700">SensorInterface implementations</text>
+  <text class="svg-muted" x="495" y="60">opti4001 · fpga_opti4001 · fpga_opti4001_lux</text>
+  <text class="svg-muted" x="495" y="79">fpga_opti4001_sysfs · ioc_opt5001 · can_als</text>
+  <text class="svg-muted" x="495" y="98">file · null</text>
+  <rect class="svg-box" x="480" y="126" width="370" height="100" rx="8"/>
+  <text class="svg-text" x="495" y="150" font-weight="700">OutputInterface implementations</text>
+  <text class="svg-muted" x="495" y="172">dimmer200 · dimmer800 · dimmer2048 · ioc_tcon</text>
+  <text class="svg-muted" x="495" y="191">fpga_sysfs_dimmer · boe_pwm · i2c_pwm</text>
+  <text class="svg-muted" x="495" y="210">ddcutil (build option) · file</text>
+  <line class="svg-line" x1="420" y1="105" x2="478" y2="70" marker-end="url(#ar3)"/>
+  <line class="svg-line" x1="420" y1="135" x2="478" y2="172" marker-end="url(#ar3)"/>
+</svg>
+<figcaption>Figure 3. The JSON <code>type</code> string selects one sensor plugin and one output plugin at start.</figcaption>
+</figure>
+
+<h3>5.3 Available sensor plugins</h3>
+<div class="tbl"><table>
+  <tr><th><code>sensor.type</code></th><th>Hardware path</th><th>Value</th><th>Notes</th></tr>
+  <tr><td><code>opti4001</code></td><td>TI OPT4001 directly on a host I2C bus (0x44 or 0x45)</td><td>lux</td><td>Reads registers 0x00/0x01. Checks device ID.</td></tr>
+  <tr><td><code>fpga_opti4001</code></td><td>OPT4001 behind an FPGA I2C slave (0x1D)</td><td>raw 24-bit × <code>scale_factor</code> (0.64)</td><td>Legacy FPGA reader.</td></tr>
+  <tr><td><code>fpga_opti4001_lux</code></td><td>OPT4001 behind fixed-RTL FPGA (0x1D)</td><td>integer lux</td><td><code>scale_factor</code> must be 1.0.</td></tr>
+  <tr><td><code>fpga_opti4001_sysfs</code></td><td>FPGA kernel driver, sysfs file</td><td>raw × <code>scale_factor</code></td><td><code>device</code> is the sysfs path.</td></tr>
+  <tr><td><code>ioc_opt5001</code></td><td>TI OPT5001 behind the ioc-deserializer MCU (0x66)</td><td>raw ADC codes</td><td>Rejects stale and torn reads. Reports "panel off".</td></tr>
+  <tr><td><code>can_als</code></td><td>SocketCAN frame, default ID 0x0A2</td><td>lux</td><td>Checks checksum and sequence. Has a data timeout.</td></tr>
+  <tr><td><code>file</code></td><td>Text file with one number</td><td>lux</td><td>For simulation and tests.</td></tr>
+  <tr><td><code>null</code></td><td>None</td><td>always −1</td><td>Forces <code>manual</code> mode. For displays without a sensor.</td></tr>
+</table></div>
+
+<h3>5.4 Available output plugins</h3>
+<div class="tbl"><table>
+  <tr><th><code>output.type</code></th><th>Hardware path</th><th>Native range</th><th>Notes</th></tr>
+  <tr><td><code>dimmer200</code></td><td>Display I2C dimmer, command 0x28</td><td>0..200</td><td>1-byte value.</td></tr>
+  <tr><td><code>dimmer800</code></td><td>FPGA dimmer, command 0x35, BCD</td><td>0..800</td><td>Same register as dimmer2048, BCD encoding.</td></tr>
+  <tr><td><code>dimmer2048</code></td><td>FPGA dimmer, command 0x35, binary</td><td>0..2048 (set by <code>value_range</code>)</td><td>Supports white-point restore.</td></tr>
+  <tr><td><code>ioc_tcon</code></td><td>Panel TCON through the ioc-deserializer MCU</td><td>13..2047 (5..800 nits)</td><td>Non-zero floor.</td></tr>
+  <tr><td><code>fpga_sysfs_dimmer</code></td><td>FPGA kernel driver, sysfs file</td><td>0..<code>value_range[1]</code></td><td>Driver does BCD.</td></tr>
+  <tr><td><code>boe_pwm</code></td><td>MPQ3367 LED driver (I2C) + host PWM pin</td><td>PWM duty</td><td>Raspberry Pi specific (<code>pinctrl</code>, <code>/sys/class/pwm</code>).</td></tr>
+  <tr><td><code>i2c_pwm</code></td><td>I2C PWM device (for example i2c-tiny-usb-pwm)</td><td>0..255 typical</td><td>Can also set up the MPQ3367.</td></tr>
+  <tr><td><code>ddcutil</code></td><td>External monitor, DDC/CI VCP 0x10</td><td>0..100</td><td>Only with <code>-DUSE_DDCUTIL=ON</code>. Slow (approx. 250&nbsp;ms per write).</td></tr>
+  <tr><td><code>file</code></td><td>Text file</td><td>0..100</td><td>For simulation and tests.</td></tr>
+</table></div>
+
+<h3>5.5 Procedure: add a new sensor plugin</h3>
+<p>Use <code>src/sensors/file_sensor.cpp</code> as a template. It is the smallest plugin.</p>
+<ol class="steps">
+  <li>Make a new file <code>src/sensors/my_sensor.cpp</code>.</li>
+  <li>Write a class that inherits from <code>SensorInterface</code>. Implement all four functions.</li>
+  <li>In <code>readLux()</code>, return a negative value when the read fails. Set the health flag to <code>false</code>.</li>
+  <li>Add a factory function <code>std::unique_ptr&lt;SensorInterface&gt; createMySensor(...)</code> in the namespace <code>als_dimmer</code>.</li>
+  <li>Add a forward declaration of the factory near the top of <code>src/main.cpp</code>.</li>
+  <li>Add an <code>else if (config.sensor.type == "my_sensor")</code> branch to <code>createSensor()</code>.</li>
+  <li>Add the type to <code>Config::validate()</code> in <code>src/config.cpp</code>. Otherwise the daemon rejects the configuration with "Unknown sensor type".</li>
+  <li>If the plugin needs new JSON keys, add them to <code>SensorConfig</code> in <code>config.hpp</code> and parse them in <code>config.cpp</code>.</li>
+  <li>Add the file to <code>CORE_SOURCES</code> in <code>CMakeLists.txt</code>.</li>
+  <li>Add a sample file <code>configs/config_my_sensor_*.json</code>.</li>
+</ol>
+<div class="callout caution"><b class="lbl">CAUTION</b><p>Do not block for a long time in <code>readLux()</code>. The main thread calls it in each cycle. A slow read delays the commands and the brightness ramp. Keep the read time much shorter than <code>update_interval_ms</code>.</p></div>
+<div class="callout caution"><b class="lbl">CAUTION</b><p>A frozen sensor value looks the same as a constant light level. If your hardware has a sequence counter or a "data valid" bit, check it. Set <code>isHealthy()</code> to <code>false</code> when the data is stale. Refer to <code>ioc_opt5001_sensor.cpp</code> for an example.</p></div>
+
+<h3>5.6 Procedure: add a new output plugin</h3>
+<ol class="steps">
+  <li>Make a new file <code>src/outputs/my_output.cpp</code>. Use <code>file_output.cpp</code> or <code>fpga_sysfs_output.cpp</code> as a template.</li>
+  <li>Write a class that inherits from <code>OutputInterface</code>.</li>
+  <li>In <code>setBrightness()</code>, clamp the input to 0..100. Scale it to the hardware range.</li>
+  <li>Keep the last written percent value. Return it from <code>getCurrentBrightness()</code>.</li>
+  <li>If the hardware has a minimum value above zero, map 0&nbsp;% to that minimum. Refer to <code>ioc_tcon_output.cpp</code>.</li>
+  <li>Add the factory, the branch in <code>createOutput()</code>, the validation rule and the CMake entry. These are the same as in steps 4 to 9 of <a href="#plugins">5.5</a>.</li>
+</ol>
+<div class="callout warning"><b class="lbl">WARNING</b><p>Do not let the output go fully black in a moving vehicle unless your display specification permits it. A black display can hide warnings from the driver. Set the lowest <code>brightness_range</code> value in the night zone, or a hardware floor in the plugin, to keep the display readable.</p></div>
+<div class="callout note"><b class="lbl">NOTE</b><p>The ramp uses <code>getCurrentBrightness()</code> as its start point. If this function reads the hardware and the hardware gives a different scale, the ramp can stop or oscillate. Return the cached percent value.</p></div>
+
+<!-- ============================================================ -->
+<h2 id="algo"><span class="num">6</span>Algorithms</h2>
+
+<p>The automatic control has two stages. Stage 1 (<b>zone mapper</b>) changes lux into a target brightness. Stage 2 (<b>ramp controller</b>) moves the display toward the target in small steps. The two stages are independent. You can tune each stage in the JSON file.</p>
+
+<h3 id="zones"><span class="num">6.1</span>Three zones for driving conditions</h3>
+<p>The human eye adapts to light differently in different conditions. One single curve from 0 to 100&nbsp;000 lux does not give good results. Thus, the daemon divides the lux scale into zones. Each zone has its own brightness range and curve. The shipped configurations use three zones:</p>
+
+<div class="tbl"><table>
+  <tr><th>Zone</th><th>Lux range</th><th>Brightness</th><th>Curve</th><th>Typical driving condition</th></tr>
+  <tr><td><span class="zone-chip" style="background:var(--z1)"></span><code>night</code></td><td>0 – 10</td><td>5 – 30&nbsp;%</td><td>logarithmic</td><td>Night drive, dark rural road, unlit tunnel, underground garage.</td></tr>
+  <tr><td><span class="zone-chip" style="background:var(--z2)"></span><code>indoor</code></td><td>10 – 500</td><td>30 – 70&nbsp;%</td><td>linear</td><td>Lit tunnel in daytime, dusk, dawn, heavy overcast, parking deck.</td></tr>
+  <tr><td><span class="zone-chip" style="background:var(--z3)"></span><code>outdoor</code></td><td>500 – 100&nbsp;000</td><td>70 – 100&nbsp;%</td><td>logarithmic</td><td>Daylight, direct sun on the display.</td></tr>
+</table></div>
+<p>The zone names are free text. The code does not use the names for decisions. You can define one zone, three zones or more. The daemon requires a minimum of one zone.</p>
+
+<h4>Zone selection rule</h4>
+<ul>
+  <li>The daemon examines the zones in the order of the JSON array.</li>
+  <li>A zone matches when <code>lux_min ≤ lux &lt; lux_max</code>.</li>
+  <li>If no zone matches (lux is above all zones), the daemon uses the <b>last</b> zone.</li>
+  <li>A negative lux value means "no data". In <code>auto</code> mode, the daemon does not change the brightness in that cycle.</li>
+</ul>
+<div class="callout caution"><b class="lbl">CAUTION</b><p>Make the zones continuous. The <code>lux_max</code> of one zone must be equal to the <code>lux_min</code> of the next zone. Also make the brightness ranges continuous. If there is a gap, the brightness jumps at the zone edge. The configuration check does not find gaps or overlaps.</p></div>
+
+<h3 id="curves"><span class="num">6.2</span>Curves in a zone</h3>
+<p>The daemon first clamps the lux value to the zone range. Then it calculates a normalized value <i>n</i> between 0 and 1. The target brightness is:</p>
+<pre>target = bright_min + int( n × (bright_max − bright_min) )        <span class="c">// clamped to 0..100</span></pre>
+<div class="grid2">
+<div class="card">
+<h4>Linear curve</h4>
+<pre>n = (lux − lux_min) / (lux_max − lux_min)</pre>
+<p>Use it when the zone range is small, for example 10 to 500 lux.</p>
+</div>
+<div class="card">
+<h4>Logarithmic curve</h4>
+<pre>n = ln(1 + lux − lux_min) / ln(1 + lux_max − lux_min)</pre>
+<p>Use it when the zone covers a large range. The eye senses light approximately on a log scale. The "+1" prevents ln(0).</p>
+</div>
+</div>
+<figure>
+<svg id="curve-chart" viewBox="0 0 820 340" role="img" aria-label="Target brightness versus lux for the default three zones"></svg>
+<figcaption>Figure 4. Target brightness against lux for the default zones (<code>configs/config_opti4001_ddcutil.json</code>). The x axis is logarithmic. The values come from the same formulas as <code>zone_mapper.cpp</code>.</figcaption>
+</figure>
+
+<h3 id="hyst"><span class="num">6.3</span>Hysteresis at zone edges</h3>
+<p>Without hysteresis, a lux value near a zone edge can change the zone in each cycle. To prevent this, set <code>control.hysteresis_percent</code> (0 to 50, 0 = off, 5 to 15 is typical).</p>
+<p>When hysteresis is on, the daemon keeps the current zone while:</p>
+<pre>lux_min × (1 − h/100)  ≤  lux  &lt;  lux_max × (1 + h/100)</pre>
+<p><b>Example</b> with h = 5 and the default zones:</p>
+<ul>
+  <li>The display is in <code>night</code> (0 to 10). It goes to <code>indoor</code> only when lux is 10.5 or more.</li>
+  <li>The display is in <code>indoor</code> (10 to 500). It goes back to <code>night</code> only when lux is less than 9.5.</li>
+</ul>
+<div class="callout note"><b class="lbl">NOTE</b><p>In the hysteresis band, lux is outside the range of the current zone. The curve clamps lux to the zone edge. Thus, the target stays at the edge value of the current zone. With continuous brightness ranges, this gives no visible jump.</p></div>
+
+<h3 id="ramp"><span class="num">6.4</span>Smooth ramp (three-tier, asymmetric steps)</h3>
+<p>The daemon never jumps directly to the target. In each cycle, it moves the brightness by one step. The step size depends on two things:</p>
+<ol>
+  <li><b>The size of the error.</b> A large error gives a large step. A small error gives a small step. Thus, the display moves fast at first and slows down near the target. There is no overshoot.</li>
+  <li><b>The direction.</b> Brightness up uses <code>*_up</code> steps. Brightness down uses <code>*_down</code> steps. The down steps are smaller.</li>
+</ol>
+<pre>error = target − current
+if      |error| &gt; error_thresholds.large : step = large_up   or large_down
+else if |error| &gt; error_thresholds.small : step = medium_up  or medium_down
+else                                     : step = small_up   or small_down
+if |error| ≤ step : next = target                      <span class="c">// last step, no overshoot</span>
+else              : next = current ± step</pre>
+<p>The step sizes and thresholds come from the zone that contains the <b>new</b> lux value.</p>
+
+<h4>Why the down steps are smaller</h4>
+<p>The eye adapts fast from dark to bright (pupil closes in less than 1 second). The eye adapts slowly from bright to dark (pupil opens in seconds, full dark adaptation takes minutes). Thus:</p>
+<ul>
+  <li><b>Tunnel exit:</b> the display must become bright fast. Otherwise the driver cannot read it in the sun.</li>
+  <li><b>Tunnel entry:</b> the display must become dark slowly. A sudden dark display is hard to read for eyes that are still adapted to daylight. A display that stays too bright for too long causes glare. The slow ramp is a compromise.</li>
+</ul>
+
+<h4>Worked example (default zones, 500 ms cycle)</h4>
+<div class="tbl"><table>
+  <tr><th>Event</th><th>Lux</th><th>Zone</th><th>Start → target</th><th>Steps</th><th>Time</th></tr>
+  <tr><td>Tunnel entry</td><td>outdoor → 2</td><td>night</td><td>60&nbsp;% → 16&nbsp;%</td><td>28</td><td>approx. 14&nbsp;s</td></tr>
+  <tr><td>Tunnel exit</td><td>2 → 20&nbsp;000</td><td>outdoor</td><td>16&nbsp;% → 95&nbsp;%</td><td>15</td><td>approx. 7.5&nbsp;s</td></tr>
+</table></div>
+<figure>
+<svg id="ramp-chart" viewBox="0 0 820 300" role="img" aria-label="Brightness ramp for tunnel entry and tunnel exit"></svg>
+<figcaption>Figure 5. Brightness in each cycle for the two events in the table. Large steps first, then medium, then small.</figcaption>
+</figure>
+<div class="callout note"><b class="lbl">NOTE</b><p>To make the ramp faster, decrease <code>update_interval_ms</code> or increase the step sizes. A shorter interval also increases the number of sensor and output bus transactions.</p></div>
+
+<h4>Try the algorithm</h4>
+<p>This calculator uses the default zones and step sizes of <code>config_opti4001_ddcutil.json</code>, without hysteresis.</p>
+<div class="calc">
+  <label>Lux value<input id="in-lux" type="number" min="0" step="any" value="2"></label>
+  <label>Current brightness (%)<input id="in-cur" type="number" min="0" max="100" step="1" value="60"></label>
+  <label>Cycle time (ms)<input id="in-ms" type="number" min="100" max="10000" step="100" value="500"></label>
+</div>
+<div class="calc-out" id="calc-out" aria-live="polite"></div>
+
+<h3 id="modes"><span class="num">6.5</span>Operating modes</h3>
+<figure>
+<svg viewBox="0 0 860 300" role="img" aria-label="Operating mode state machine">
+  <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/></marker></defs>
+  <rect class="svg-core" x="40" y="110" width="170" height="70" rx="35"/>
+  <text class="svg-text" x="125" y="141" text-anchor="middle" font-weight="700">AUTO</text>
+  <text class="svg-muted" x="125" y="160" text-anchor="middle">sensor controls</text>
+  <rect class="svg-box" x="345" y="20" width="200" height="70" rx="35"/>
+  <text class="svg-text" x="445" y="51" text-anchor="middle" font-weight="700">MANUAL_TEMPORARY</text>
+  <text class="svg-muted" x="445" y="70" text-anchor="middle">user value, timer runs</text>
+  <rect class="svg-box" x="650" y="110" width="170" height="70" rx="35"/>
+  <text class="svg-text" x="735" y="141" text-anchor="middle" font-weight="700">MANUAL</text>
+  <text class="svg-muted" x="735" y="160" text-anchor="middle">user value, sticky</text>
+  <path class="svg-line" d="M170,108 C210,50 280,40 343,48" marker-end="url(#ar4)"/>
+  <text class="svg-muted" x="180" y="40">set_brightness / adjust /</text>
+  <text class="svg-muted" x="180" y="56">set_absolute_brightness</text>
+  <path class="svg-line" d="M345,72 C290,100 250,120 212,130" marker-end="url(#ar4)"/>
+  <text class="svg-muted" x="262" y="122">timeout (60 s)</text>
+  <path class="svg-line" d="M545,55 C620,60 690,80 720,108" marker-end="url(#ar4)"/>
+  <text class="svg-muted" x="620" y="58">set_mode manual</text>
+  <path class="svg-line" d="M212,160 L648,160" marker-end="url(#ar4)"/>
+  <text class="svg-muted" x="430" y="152" text-anchor="middle">set_mode manual · sensor failure</text>
+  <path class="svg-line" d="M650,175 C500,240 330,240 212,175" marker-end="url(#ar4)"/>
+  <text class="svg-muted" x="430" y="238" text-anchor="middle">set_mode auto (only if the sensor is available)</text>
+  <path class="svg-line" d="M545,78 C560,110 560,110 520,92" marker-end="url(#ar4)"/>
+  <text class="svg-muted" x="560" y="112">new value: timer restarts</text>
+  <text class="svg-muted" x="430" y="285" text-anchor="middle">Restart: AUTO → AUTO · MANUAL → MANUAL · MANUAL_TEMPORARY → AUTO</text>
+</svg>
+<figcaption>Figure 6. Mode transitions. A client can request only <code>auto</code> or <code>manual</code>. The daemon sets <code>manual_temporary</code> itself.</figcaption>
+</figure>
+
+<h4>Rules</h4>
+<ul>
+  <li>In <code>auto</code>, a brightness command changes the mode to <code>manual_temporary</code> and starts the timer.</li>
+  <li>In <code>manual_temporary</code>, each new brightness command restarts the timer.</li>
+  <li>When the timer reaches <code>auto_resume_timeout_sec</code> (default 60), the mode goes back to <code>auto</code>. The ramp then moves smoothly from the user value to the sensor target.</li>
+  <li>In <code>manual</code>, a brightness command changes only the value. The mode stays <code>manual</code>.</li>
+  <li>When a client selects <code>manual</code>, the daemon keeps the current brightness. Thus, the display does not jump.</li>
+  <li>A client cannot select <code>auto</code> when the sensor is not available. The daemon replies with error <code>SENSOR_UNAVAILABLE</code>.</li>
+</ul>
+<div class="callout note"><b class="lbl">NOTE</b><p>For a 1 to 2 minute temporary override, set <code>auto_resume_timeout_sec</code> to a value from 60 to 120.</p></div>
+
+<h4>State persistence</h4>
+<p>The state file (<code>control.state_file</code>) contains the mode, the manual brightness and the last automatic brightness. The daemon writes the file after each mode or brightness command and at shutdown. It writes a temporary file, calls <code>fsync()</code>, and renames it over the old file. Thus, a power loss during the write does not destroy the saved mode.</p>
+<div class="callout caution"><b class="lbl">CAUTION</b><p>The default path in many sample configurations is <code>/tmp/als-dimmer-state.json</code>. On most systems, <code>/tmp</code> is cleared at boot. Then the <code>manual</code> mode does not survive a restart. Use a persistent path, for example <code>/var/lib/als-dimmer/state.json</code>.</p></div>
+
+<h3 id="watchdog"><span class="num">6.6</span>Sensor watchdog and fallback</h3>
+<p>The daemon must keep the display controllable when the sensor fails. Thus:</p>
+<ol class="steps">
+  <li>If the sensor <code>init()</code> fails at start, the daemon installs a <code>NullSensor</code>. It sets <code>manual</code> mode.</li>
+  <li>During operation, the daemon records the last time that <code>isHealthy()</code> was <code>true</code>.</li>
+  <li>If the sensor stays unhealthy for <code>sensor_failure_timeout_sec</code> (default 30&nbsp;s), the daemon replaces it with a <code>NullSensor</code>. It sets <code>manual</code> mode.</li>
+  <li>If the manual brightness is 0 or less, the daemon uses <code>fallback_brightness</code> (default 50&nbsp;%).</li>
+  <li><code>get_status</code> reports <code>"sensor_status": "unavailable"</code>.</li>
+</ol>
+<div class="callout note"><b class="lbl">NOTE</b><p>The daemon does not try to use the sensor again after a fallback. Restart the daemon to recover the sensor.</p></div>
+<p>The option <code>control.minimal_i2c = true</code> stops sensor reads in the manual modes. Use it when the I2C bus is busy. The watchdog does not count the skipped reads as failures.</p>
+
+<h3 id="nits"><span class="num">6.7</span>Optional: absolute brightness (nits) and thermal compensation</h3>
+<p>These features do not change the automatic control. They let an HMI read and set the brightness in nits.</p>
+<ul>
+  <li><b>Brightness-to-nits LUT</b> (<code>brightness_to_nits</code>). A CSV file maps brightness percent to measured nits. The daemon uses linear interpolation in both directions. Out-of-range requests are clamped and flagged. Make the table with <code>tools/als-dimmer-sweep.py</code> and a colorimeter.</li>
+  <li><b>Thermal compensation</b> (<code>thermal_compensation</code>). A warm backlight gives 4 to 8&nbsp;% fewer nits. The daemon reads the backlight temperature (direct I2C or a shell command), finds a factor in a CSV table and multiplies the LUT result by this factor. If the temperature is not available, the factor is 1.0.</li>
+</ul>
+<p>Refer to <code>README.md</code>, section "Adding or Updating a Display Calibration", for the full procedure.</p>
+
+<!-- ============================================================ -->
+<h2 id="control"><span class="num">7</span>Control interface</h2>
+
+<h3>7.1 Transport</h3>
+<ul>
+  <li><b>TCP</b>: <code>127.0.0.1:9000</code> by default.</li>
+  <li><b>Unix socket</b>: <code>/tmp/als-dimmer.sock</code> by default. The file mode, owner and group are configurable.</li>
+  <li>Each message is one JSON object on one line. The daemon sends one JSON reply for each request.</li>
+</ul>
+<div class="callout warning"><b class="lbl">WARNING</b><p>The interface has no authentication. Any client that can connect can change the display brightness. Do not set <code>listen_address</code> to <code>0.0.0.0</code> on a vehicle network. Keep TCP on <code>127.0.0.1</code>, or turn it off and use only the Unix socket with restricted permissions.</p></div>
+
+<h3>7.2 Request and reply format</h3>
+<pre>{"version":"1.0","command":"set_brightness","params":{"brightness":75}}
+
+{"version":"1.0","status":"success","message":"Brightness set successfully","data":{"brightness":75}}</pre>
+
+<h3>7.3 Commands</h3>
+<div class="tbl"><table>
+  <tr><th>Command</th><th>Parameters</th><th>Effect</th></tr>
+  <tr><td><code>get_status</code></td><td>–</td><td>Returns mode, brightness, lux, zone, sensor status, nits (if calibrated) and thermal data.</td></tr>
+  <tr><td><code>get_config</code></td><td>–</td><td>Returns mode, manual brightness, last auto brightness, output type, calibration range.</td></tr>
+  <tr><td><code>set_mode</code></td><td><code>mode</code>: <code>"auto"</code> | <code>"manual"</code></td><td>Changes the mode. <code>"manual_temporary"</code> is rejected.</td></tr>
+  <tr><td><code>set_brightness</code></td><td><code>brightness</code>: 0..100</td><td>Sets the manual value. In <code>auto</code>, starts <code>manual_temporary</code>.</td></tr>
+  <tr><td><code>adjust_brightness</code></td><td><code>delta</code>: −100..100</td><td>Adds the delta to the manual value. Same mode rule as <code>set_brightness</code>.</td></tr>
+  <tr><td><code>get_absolute_brightness</code></td><td>–</td><td>Returns percent and nits. Nits is <code>null</code> without a LUT.</td></tr>
+  <tr><td><code>set_absolute_brightness</code></td><td><code>nits</code>: ≥ 0</td><td>Sets the brightness from a nits value. Needs a LUT.</td></tr>
+  <tr><td><code>get_calibration_info</code></td><td>–</td><td>Returns LUT range, label, row count and thermal state.</td></tr>
+</table></div>
+<p>Error codes: <code>INVALID_PARAMS</code>, <code>SENSOR_UNAVAILABLE</code>, <code>CALIBRATION_NOT_LOADED</code>, <code>UNKNOWN_COMMAND</code>, <code>PARSE_ERROR</code>, <code>INVALID_FORMAT</code>, <code>INTERNAL_ERROR</code>.</p>
+<div class="callout note"><b class="lbl">NOTE</b><p>When an HMI slider sends many <code>set_brightness</code> commands quickly, the daemon keeps only the latest queued one. It never drops <code>adjust_brightness</code> commands, because each delta counts.</p></div>
+
+<h3>7.4 Command-line client</h3>
+<pre>als-dimmer-client --status
+als-dimmer-client --brightness=75
+als-dimmer-client --adjust=-10
+als-dimmer-client --mode=manual
+als-dimmer-client --mode=auto
+als-dimmer-client --use-unix-socket --status
+als-dimmer-client --status --json</pre>
+
+<h3>7.5 Change notifications</h3>
+<p>Set <code>notification.enabled</code> and <code>notification.on_change_script</code>. The daemon starts the script with two arguments: the event name and the new value.</p>
+<pre>my-script.sh mode_changed       manual_temporary
+my-script.sh brightness_changed 42
+my-script.sh zone_changed       night</pre>
+<p>The daemon sends an event only when the value changes. It sends a maximum of one <code>brightness_changed</code> event each second. The script runs in the background. The daemon does not wait for it.</p>
+
+<!-- ============================================================ -->
+<h2 id="config"><span class="num">8</span>Configuration reference</h2>
+
+<p>The daemon reads one JSON file (<code>--config &lt;path&gt;</code>). The blocks <code>sensor</code>, <code>output</code> and <code>zones</code> are mandatory. All other blocks are optional. Keys that start with <code>_comment</code> are ignored. Use them for notes.</p>
+
+<h3>8.1 Minimum example</h3>
+<pre>{
+  "sensor": { "type": "opti4001", "device": "/dev/i2c-1", "address": "0x44" },
+  "output": { "type": "dimmer2048", "device": "/dev/i2c-1", "address": "0x1D" },
+  "control": {
+    "update_interval_ms": 500,
+    "hysteresis_percent": 5.0,
+    "auto_resume_timeout_sec": 90,
+    "state_file": "/var/lib/als-dimmer/state.json"
+  },
+  "zones": [
+    { "name": "night",   "lux_range": [0, 10],       "brightness_range": [5, 30],   "curve": "logarithmic",
+      "step_sizes": { "large_up": 5,  "large_down": 3, "medium_up": 2, "medium_down": 1, "small_up": 1, "small_down": 1 },
+      "error_thresholds": { "large": 20, "small": 5 } },
+    { "name": "indoor",  "lux_range": [10, 500],     "brightness_range": [30, 70],  "curve": "linear",
+      "step_sizes": { "large_up": 8,  "large_down": 4, "medium_up": 3, "medium_down": 2, "small_up": 1, "small_down": 1 },
+      "error_thresholds": { "large": 25, "small": 8 } },
+    { "name": "outdoor", "lux_range": [500, 100000], "brightness_range": [70, 100], "curve": "logarithmic",
+      "step_sizes": { "large_up": 10, "large_down": 5, "medium_up": 4, "medium_down": 2, "small_up": 2, "small_down": 1 },
+      "error_thresholds": { "large": 30, "small": 10 } }
+  ]
+}</pre>
+
+<h3>8.2 <code>control</code> block</h3>
+<div class="tbl"><table>
+  <tr><th>Key</th><th>Default</th><th>Permitted</th><th>Function</th></tr>
+  <tr><td><code>update_interval_ms</code></td><td>500</td><td>100..10000</td><td>Loop period. One ramp step for each period.</td></tr>
+  <tr><td><code>hysteresis_percent</code></td><td>0</td><td>0..50</td><td>Zone-edge hysteresis. 0 = off.</td></tr>
+  <tr><td><code>auto_resume_timeout_sec</code></td><td>60</td><td>–</td><td>Duration of <code>manual_temporary</code>.</td></tr>
+  <tr><td><code>sensor_failure_timeout_sec</code></td><td>30</td><td>–</td><td>Unhealthy time before the fallback to <code>manual</code>.</td></tr>
+  <tr><td><code>fallback_brightness</code></td><td>50</td><td>0..100</td><td>Brightness after a sensor failure when no manual value exists.</td></tr>
+  <tr><td><code>state_file</code></td><td><code>/var/lib/als-dimmer/state.json</code></td><td>path</td><td>Persistent mode and manual value.</td></tr>
+  <tr><td><code>minimal_i2c</code></td><td>false</td><td>bool</td><td>Skip sensor reads in manual modes.</td></tr>
+  <tr><td><code>log_level</code></td><td><code>info</code></td><td>trace, debug, info, warn, error</td><td>Log detail. <code>--log-level</code> overrides it.</td></tr>
+  <tr><td><code>tcp_socket.*</code></td><td>on, 127.0.0.1:9000</td><td>–</td><td><code>enabled</code>, <code>listen_address</code>, <code>listen_port</code>.</td></tr>
+  <tr><td><code>unix_socket.*</code></td><td>on, <code>/tmp/als-dimmer.sock</code>, 0660</td><td>–</td><td><code>enabled</code>, <code>path</code>, <code>permissions</code>, <code>owner</code>, <code>group</code>.</td></tr>
+</table></div>
+
+<h3>8.3 Zone keys</h3>
+<div class="tbl"><table>
+  <tr><th>Key</th><th>Required</th><th>Default</th><th>Rule</th></tr>
+  <tr><td><code>name</code></td><td>yes</td><td>–</td><td>Free text. Shown in status and logs.</td></tr>
+  <tr><td><code>lux_range</code></td><td>yes</td><td>–</td><td><code>[min, max]</code>, min &lt; max.</td></tr>
+  <tr><td><code>brightness_range</code></td><td>yes</td><td>–</td><td><code>[min, max]</code> inside 0..100.</td></tr>
+  <tr><td><code>curve</code></td><td>no</td><td><code>linear</code></td><td><code>linear</code> or <code>logarithmic</code>.</td></tr>
+  <tr><td><code>step_sizes</code></td><td>no</td><td>up 10/4/2, down 5/2/1</td><td>Use the six keys <code>large_up</code> … <code>small_down</code>. See <a href="#limits">section 13</a>.</td></tr>
+  <tr><td><code>error_thresholds</code></td><td>no</td><td>large 30, small 10</td><td>Error limits for large and medium steps.</td></tr>
+</table></div>
+
+<h3>8.4 Other blocks</h3>
+<div class="tbl"><table>
+  <tr><th>Block</th><th>Function</th></tr>
+  <tr><td><code>notification</code></td><td>Callback script. See <a href="#control">7.5</a>.</td></tr>
+  <tr><td><code>brightness_to_nits</code></td><td>Nits LUT. A relative path is relative to the configuration file.</td></tr>
+  <tr><td><code>thermal_compensation</code></td><td>Temperature correction of nits. Off by default.</td></tr>
+  <tr><td><code>white_point_calibration</code></td><td>FPGA white-point restore at start. Only for FPGA dimmer displays. It has no effect on other outputs.</td></tr>
+  <tr><td><code>calibration</code></td><td>Reserved. The current code does not use it.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="tuning"><span class="num">9</span>Procedure: tune the zones for a new display</h2>
+<p>Most head units can use the daemon without code changes. Usually you change only the JSON file.</p>
+<ol class="steps">
+  <li>Select the sensor and output plugins. Set <code>sensor.type</code>, <code>output.type</code>, bus and address.</li>
+  <li>Start the daemon with <code>--foreground --log-level debug --csvlog /tmp/als.csv</code>.</li>
+  <li>Record the sensor value in each condition: night, tunnel, overcast day and direct sun.</li>
+  <li>Set the zone edges between these values. Make the zones continuous.</li>
+  <li>For each zone, find the lowest and highest comfortable brightness. Set <code>brightness_range</code>.</li>
+  <li>Make the brightness ranges continuous at the zone edges.</li>
+  <li>Set <code>hysteresis_percent</code> to 5 to 10.</li>
+  <li>Drive through a tunnel. Look at the ramp time. Change the step sizes if necessary.</li>
+  <li>Keep the down steps approximately half of the up steps.</li>
+  <li>Use <code>tools/visualize_csv.py</code> to examine the CSV log.</li>
+</ol>
+<div class="callout caution"><b class="lbl">CAUTION</b><p>If the sensor is behind the display glass (for example <code>ioc_opt5001</code>), the screen light adds to the reading. A white screen can then move the loop into a brighter zone, which makes the screen brighter again. Set each zone upper edge above the value that a full-white screen gives at that zone's maximum brightness. Refer to <code>configs/config_ioc_opt5001_tcon_ots17.json</code>.</p></div>
+<div class="callout note"><b class="lbl">NOTE</b><p>The algorithm does not need real lux. If the sensor gives raw codes, set <code>scale_factor</code> to 1.0 and write the zone edges in codes.</p></div>
+
+<!-- ============================================================ -->
+<h2 id="linux"><span class="num">10</span>Procedure: build and use on Linux</h2>
+
+<h3>10.1 Build</h3>
+<pre><span class="c"># Dependencies (Debian / Ubuntu / Raspberry Pi OS)</span>
+sudo apt-get install -y build-essential cmake pkg-config libi2c-dev
+sudo apt-get install -y libddcutil-dev     <span class="c"># only for the ddcutil output</span>
+
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DINSTALL_SYSTEMD_SERVICE=ON \
+      -DCONFIG_FILE=config_fpga_opti4001_lux_dimmer2048.json \
+      -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build build -j
+sudo cmake --install build</pre>
+<p>For a cross-compile, refer to <code>toolchain-pi4-aarch64.cmake</code>.</p>
+
+<h3>10.2 Test without hardware</h3>
+<ol class="steps">
+  <li>Start the daemon: <code>./build/als-dimmer --config configs/config_simulation.json --foreground</code>.</li>
+  <li>Write a lux value: <code>echo 2 &gt; /tmp/als_lux.txt</code>.</li>
+  <li>Read the brightness: <code>cat /tmp/als_brightness.txt</code>. The value decreases step by step.</li>
+  <li>Write a new value: <code>echo 20000 &gt; /tmp/als_lux.txt</code>. The value increases.</li>
+  <li>Send a manual value: <code>./build/als-dimmer-client --brightness=40</code>.</li>
+  <li>Read the status: <code>./build/als-dimmer-client --status</code>. The mode is <code>manual_temporary</code>.</li>
+</ol>
+<p>The script <code>tools/als-dimmer-auto-test.sh</code> runs a longer automatic test.</p>
+
+<h3>10.3 Run as a service</h3>
+<pre>sudo systemctl enable als-dimmer
+sudo systemctl start als-dimmer
+journalctl -u als-dimmer -f</pre>
+<div class="callout note"><b class="lbl">NOTE</b><p>The systemd security directives in <code>systemd/als-dimmer.service.in</code> are commented out for compatibility. If the service fails with status 226/NAMESPACE, refer to <code>README.md</code>, "Troubleshooting".</p></div>
+
+<!-- ============================================================ -->
+<h2 id="android"><span class="num">11</span>Port to Android</h2>
+<p>Android uses the Linux kernel. Thus, the I2C, sysfs and socket code works. The changes are in the build, the start and the security policy.</p>
+
+<h3>11.1 Procedure</h3>
+<ol class="steps">
+  <li>Build the daemon with the Android NDK. CMake works with the NDK toolchain file. Alternatively, write an <code>Android.bp</code> file with <code>cc_binary</code>.</li>
+  <li>Remove the <code>ddcutil</code> output from the build. Keep <code>USE_DDCUTIL=OFF</code>.</li>
+  <li>Install the binary in <code>/vendor/bin/</code>. Install the configuration in <code>/vendor/etc/als-dimmer/</code>.</li>
+  <li>Write an init <code>.rc</code> file. Use <code>class hal</code> or <code>class main</code>. Set <code>user</code> and <code>group</code> with access to the I2C device.</li>
+  <li>Set the Unix socket path to a directory that the daemon can write, for example <code>/data/vendor/als-dimmer/</code>. Set the state file in the same directory.</li>
+  <li>Write the SELinux policy. The daemon needs access to the I2C device nodes, its data directory and its socket.</li>
+  <li>Turn off the TCP socket if no client uses it.</li>
+  <li>Connect the HMI. A vendor service or a HAL can send JSON commands to the Unix socket.</li>
+</ol>
+<div class="callout caution"><b class="lbl">CAUTION</b><p>Android has its own automatic brightness function. If Android and als-dimmer both control the same display, they fight. Turn off the Android adaptive brightness for this display. Or make Android send its slider value to als-dimmer with <code>set_brightness</code>.</p></div>
+
+<div class="tbl"><table>
+  <tr><th>Item</th><th>Linux (current)</th><th>Android</th></tr>
+  <tr><td>Start</td><td>systemd unit</td><td>init <code>.rc</code> service</td></tr>
+  <tr><td>Log</td><td>stdout / journald</td><td>stdout is lost. Add a <code>__android_log_print</code> sink to <code>logger.hpp</code>, or use <code>logwrapper</code>.</td></tr>
+  <tr><td>Notify script</td><td><code>fork()</code> + <code>execl()</code></td><td>Works. The script needs an SELinux exec permission.</td></tr>
+  <tr><td>Thermal <code>temp_command</code></td><td><code>popen()</code> + <code>/bin/sh</code></td><td>Use <code>/system/bin/sh</code>, or use the direct I2C temperature source.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="qnx"><span class="num">12</span>Port to QNX</h2>
+<p>The core (zone mapper, ramp, modes, state, JSON protocol) is portable C++14 and POSIX. The plugins contain most Linux-specific code. The table shows each Linux dependency and a QNX replacement.</p>
+
+<div class="tbl"><table>
+  <tr><th>Area</th><th>Linux code</th><th>Where</th><th>QNX replacement</th></tr>
+  <tr><td>I2C</td><td><code>&lt;linux/i2c-dev.h&gt;</code>, <code>ioctl(I2C_SLAVE)</code>, <code>ioctl(I2C_RDWR)</code>, <code>read()</code>/<code>write()</code></td><td>most sensors and outputs, <code>thermal_compensation.cpp</code>, <code>wp_adjust_restore.cpp</code></td><td>QNX I2C resource manager: <code>open("/dev/i2c1")</code> and <code>devctl()</code> with <code>DCMD_I2C_SEND</code>, <code>DCMD_I2C_RECV</code>, <code>DCMD_I2C_SENDRECV</code>.</td></tr>
+  <tr><td>sysfs</td><td>files under <code>/sys/...</code></td><td><code>fpga_sysfs_*</code>, <code>boe_pwm</code></td><td>No sysfs. Use the driver API of your BSP, or a resource manager.</td></tr>
+  <tr><td>PWM</td><td><code>/sys/class/pwm</code>, <code>pinctrl</code></td><td><code>boe_pwm_output.cpp</code></td><td>BSP-specific PWM driver. Usually you do not port this plugin.</td></tr>
+  <tr><td>CAN</td><td>SocketCAN (<code>&lt;linux/can.h&gt;</code>)</td><td><code>can_als_sensor.cpp</code></td><td>QNX CAN driver (<code>dev-can-*</code>) message API. Keep the frame decode logic.</td></tr>
+  <tr><td>DDC/CI</td><td>libddcutil</td><td><code>ddcutil_output.cpp</code></td><td>Not applicable. Do not build it.</td></tr>
+  <tr><td>Sockets</td><td>BSD sockets, <code>poll()</code>, <code>AF_UNIX</code></td><td><code>control_interface.cpp</code></td><td>Supported (io-sock or io-pkt). No change expected.</td></tr>
+  <tr><td>Threads</td><td><code>std::thread</code>, <code>std::mutex</code></td><td>control, thermal</td><td>Supported by QCC with C++14. Link with the QNX C++ library.</td></tr>
+  <tr><td>Process start</td><td><code>fork()</code> + <code>execl()</code></td><td><code>notifier.cpp</code></td><td>Use <code>posix_spawn()</code>. <code>fork()</code> has limits in a multi-thread process on QNX.</td></tr>
+  <tr><td>Shell command</td><td><code>popen()</code></td><td><code>thermal_compensation.cpp</code></td><td>Supported. The direct I2C source is better.</td></tr>
+  <tr><td>Atomic file write</td><td><code>open</code>, <code>fsync</code>, <code>rename</code></td><td><code>state_manager.cpp</code></td><td>Supported (POSIX). Put the state file on a persistent file system.</td></tr>
+  <tr><td>Start and restart</td><td>systemd</td><td><code>systemd/*.service.in</code></td><td>SLM (System Launch and Monitor) configuration or the startup script.</td></tr>
+  <tr><td>Logs</td><td><code>std::cout</code>/<code>std::cerr</code></td><td><code>logger.hpp</code></td><td>Optional: add a <code>slog2</code> sink.</td></tr>
+</table></div>
+
+<h3>12.1 Procedure</h3>
+<ol class="steps">
+  <li>Build the core and the <code>file</code> plugins first. Use the QNX SDP CMake toolchain (<code>qcc</code>, C++14).</li>
+  <li>Run the simulation test of <a href="#linux">10.2</a> on the QNX target. This proves the core, the sockets and the threads.</li>
+  <li>Write a small I2C helper with two functions: write bytes, and write-then-read bytes. Implement it with <code>devctl()</code>.</li>
+  <li>Change one sensor plugin and one output plugin to use the helper. Start with the plugins that your display uses.</li>
+  <li>Exclude the Linux-only plugins from <code>CORE_SOURCES</code> on QNX. Remove their branches from the factories with <code>#ifdef</code>.</li>
+  <li>Replace <code>fork()</code> + <code>execl()</code> in <code>notifier.cpp</code> with <code>posix_spawn()</code>.</li>
+  <li>Add an SLM entry. Restart the daemon if it stops.</li>
+  <li>Do the zone tuning of <a href="#tuning">section 9</a> on the vehicle.</li>
+</ol>
+<div class="callout note"><b class="lbl">NOTE</b><p>Do not change <code>zone_mapper.cpp</code>, <code>brightness_controller.cpp</code> or <code>state_manager.cpp</code> during the port. They contain no platform code. If you keep them the same, all platforms behave identically.</p></div>
+
+<!-- ============================================================ -->
+<h2 id="limits"><span class="num">13</span>Known behaviors and limits</h2>
+<p>These items come from a review of the code. Read them before you tune or port the daemon.</p>
+<div class="tbl"><table>
+  <tr><th>#</th><th>Item</th><th>Effect</th><th>What to do</th></tr>
+  <tr><td>1</td><td>The short step keys <code>large</code>, <code>medium</code>, <code>small</code> are read but not used.</td><td>The ramp uses only the six <code>*_up</code>/<code>*_down</code> keys. If a zone has only the short keys, the defaults apply (up 10/4/2, down 5/2/1). Example: <code>config_simulation.json</code>, <code>config_ioc_opt5001_tcon_ots17.json</code>.</td><td>Always write the six direction keys.</td></tr>
+  <tr><td>2</td><td><code>sensor_error_timeout_sec</code> is read but not used.</td><td>Only <code>sensor_failure_timeout_sec</code> (default 30&nbsp;s) controls the fallback.</td><td>Set <code>sensor_failure_timeout_sec</code>.</td></tr>
+  <tr><td>3</td><td><code>adjust_brightness</code> adds the delta to the stored manual value, not to the current display value.</td><td>In <code>auto</code> at 80&nbsp;% with a stored manual value of 50&nbsp;%, a delta of +10 gives 60&nbsp;%.</td><td>From an HMI in <code>auto</code>, prefer <code>set_brightness</code> with an absolute value.</td></tr>
+  <tr><td>4</td><td>The "simple" mapping without zones cannot be reached.</td><td>The configuration check requires a minimum of one zone.</td><td>Define zones.</td></tr>
+  <tr><td>5</td><td>The sensor types <code>veml7700</code> and <code>custom_i2c</code>, and the output types <code>custom_i2c</code> and <code>can</code>, pass the configuration check but have no plugin.</td><td>Sensor: the daemon falls back to <code>manual</code>. Output: the daemon stops.</td><td>Do not use these types.</td></tr>
+  <tr><td>6</td><td>Many sample configurations put the state file in <code>/tmp</code>.</td><td><code>manual</code> mode does not survive a reboot.</td><td>Use a persistent path.</td></tr>
+  <tr><td>7</td><td>The periodic state save in the loop depends on the loop time.</td><td>The save after each command and at shutdown is reliable. The periodic save can miss a cycle.</td><td>No action. Commands save the state immediately.</td></tr>
+  <tr><td>8</td><td>No authentication on the control sockets.</td><td>Any local process can change the brightness.</td><td>Restrict the socket permissions. Keep TCP on localhost.</td></tr>
+  <tr><td>9</td><td>A sensor is not used again after the watchdog fallback.</td><td>The display stays in <code>manual</code> until restart.</td><td>Let the service manager restart the daemon if necessary.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="files"><span class="num">14</span>Source file map</h2>
+<pre>als-dimmer/
+├── CMakeLists.txt                 <span class="c">build; options USE_DDCUTIL, INSTALL_SYSTEMD_SERVICE, CONFIG_FILE</span>
+├── include/als-dimmer/
+│   ├── interfaces.hpp             <span class="c">SensorInterface, OutputInterface  ← start here</span>
+│   ├── config.hpp                 <span class="c">all JSON keys and defaults</span>
+│   ├── zone_mapper.hpp            <span class="c">zone selection, curves, hysteresis</span>
+│   ├── brightness_controller.hpp  <span class="c">three-tier asymmetric ramp</span>
+│   ├── state_manager.hpp          <span class="c">modes and persistence</span>
+│   ├── sensors/ outputs/          <span class="c">plugin headers</span>
+│   └── ...
+├── src/
+│   ├── main.cpp                   <span class="c">start, factories, control loop, command handler</span>
+│   ├── sensors/*.cpp              <span class="c">sensor plugins</span>
+│   ├── outputs/*.cpp              <span class="c">output plugins</span>
+│   └── ...
+├── configs/                       <span class="c">sample JSON configurations</span>
+├── calibrations/                  <span class="c">brightness-to-nits and thermal CSV tables</span>
+├── tools/                         <span class="c">client, sweep, test and plot tools</span>
+├── systemd/                       <span class="c">service templates</span>
+└── docs/
+    ├── overview-doc.html          <span class="c">this document</span>
+    └── latex/                     <span class="c">detailed design specification (human vision, response time)</span></pre>
+
+<p style="color:var(--muted);font-size:13.5px;margin-top:40px">End of document.</p>
+</main>
+</div>
+
+<script>
+(function () {
+  // Theme toggle (auto -> light -> dark)
+  var root = document.documentElement, btn = document.getElementById('theme-btn');
+  var modes = ['auto', 'light', 'dark'], cur = 'auto';
+  try { cur = localStorage.getItem('als-doc-theme') || 'auto'; } catch (e) {}
+  function apply() {
+    if (cur === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', cur);
+    btn.textContent = 'Theme: ' + cur;
+  }
+  btn.addEventListener('click', function () {
+    cur = modes[(modes.indexOf(cur) + 1) % modes.length];
+    try { localStorage.setItem('als-doc-theme', cur); } catch (e) {}
+    apply();
+  });
+  apply();
+
+  // Mobile TOC copy
+  document.getElementById('toc-mobile').innerHTML = document.getElementById('toc-list').innerHTML;
+
+  // Scroll spy
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var targets = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  function spy() {
+    var y = window.scrollY + 80, idx = 0;
+    targets.forEach(function (t, i) { if (t && t.offsetTop <= y) idx = i; });
+    links.forEach(function (a, i) { a.classList.toggle('active', i === idx); });
+  }
+  window.addEventListener('scroll', spy, { passive: true }); spy();
+
+  // ---- Algorithm model: same formulas as zone_mapper.cpp and brightness_controller.cpp ----
+  // Zones from configs/config_opti4001_ddcutil.json
+  var Z = [
+    { name: 'night',   lux: [0, 10],       br: [5, 30],   curve: 'log', up: [5, 2, 1],  down: [3, 1, 1], th: [20, 5],  color: 'var(--z1)' },
+    { name: 'indoor',  lux: [10, 500],     br: [30, 70],  curve: 'lin', up: [8, 3, 1],  down: [4, 2, 1], th: [25, 8],  color: 'var(--z2)' },
+    { name: 'outdoor', lux: [500, 100000], br: [70, 100], curve: 'log', up: [10, 4, 2], down: [5, 2, 1], th: [30, 10], color: 'var(--z3)' }
+  ];
+  function zoneFor(lux) {
+    for (var i = 0; i < Z.length; i++) if (lux >= Z[i].lux[0] && lux < Z[i].lux[1]) return Z[i];
+    return Z[Z.length - 1];
+  }
+  function target(lux, z) {
+    var a = z.lux[0], b = z.lux[1], l = Math.max(a, Math.min(lux, b)), range = b - a, n;
+    n = z.curve === 'lin' ? (l - a) / range : Math.log(1 + l - a) / Math.log(1 + range);
+    return Math.max(0, Math.min(100, z.br[0] + Math.trunc(n * (z.br[1] - z.br[0]))));
+  }
+  function ramp(cur, lux) {
+    var z = zoneFor(lux), t = target(lux, z), seq = [cur], guard = 0;
+    while (cur !== t && guard++ < 500) {
+      var e = t - cur, a = Math.abs(e), s = e > 0 ? z.up : z.down;
+      var step = a > z.th[0] ? s[0] : a > z.th[1] ? s[1] : s[2];
+      cur = a <= step ? t : cur + (e > 0 ? step : -step);
+      seq.push(cur);
+    }
+    return { zone: z, target: t, seq: seq };
+  }
+
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs, text) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // Curve chart
+  (function () {
+    var svg = document.getElementById('curve-chart');
+    var L = 60, R = 790, T = 20, B = 290;
+    var xmax = Math.log10(1 + 100000);
+    function X(lux) { return L + (Math.log10(1 + lux) / xmax) * (R - L); }
+    function Y(b) { return B - (b / 100) * (B - T); }
+    [0, 25, 50, 75, 100].forEach(function (b) {
+      svg.appendChild(el('line', { x1: L, x2: R, y1: Y(b), y2: Y(b), 'class': 'svg-grid' }));
+      svg.appendChild(el('text', { x: L - 8, y: Y(b) + 4, 'text-anchor': 'end', 'class': 'svg-muted' }, b + '%'));
+    });
+    [0, 1, 10, 100, 1000, 10000, 100000].forEach(function (l) {
+      svg.appendChild(el('line', { x1: X(l), x2: X(l), y1: T, y2: B, 'class': 'svg-grid' }));
+      svg.appendChild(el('text', { x: X(l), y: B + 18, 'text-anchor': 'middle', 'class': 'svg-muted' }, l >= 1000 ? (l / 1000) + 'k' : String(l)));
+    });
+    svg.appendChild(el('text', { x: (L + R) / 2, y: B + 40, 'text-anchor': 'middle', 'class': 'svg-muted' }, 'Ambient light (lux, log scale)'));
+    Z.forEach(function (z) {
+      svg.appendChild(el('rect', { x: X(z.lux[0]), y: T, width: X(z.lux[1]) - X(z.lux[0]), height: B - T, style: 'fill:' + z.color + ';opacity:0.07' }));
+      var d = '', N = 160;
+      for (var i = 0; i <= N; i++) {
+        var lx = Math.pow(10, Math.log10(1 + z.lux[0]) + (Math.log10(1 + z.lux[1]) - Math.log10(1 + z.lux[0])) * i / N) - 1;
+        if (i === N) lx = z.lux[1] - 1e-6;
+        d += (i ? 'L' : 'M') + X(lx).toFixed(1) + ',' + Y(target(lx, z)).toFixed(1);
+      }
+      svg.appendChild(el('path', { d: d, style: 'fill:none;stroke-width:2.5;stroke:' + z.color }));
+      var mid = (X(z.lux[0]) + X(z.lux[1])) / 2;
+      svg.appendChild(el('text', { x: mid, y: T + 16, 'text-anchor': 'middle', 'class': 'svg-text', style: 'fill:' + z.color + ';font-weight:600' }, z.name + ' (' + z.curve + ')'));
+    });
+  })();
+
+  // Ramp chart
+  (function () {
+    var svg = document.getElementById('ramp-chart');
+    var a = ramp(60, 2).seq, b = ramp(16, 20000).seq;
+    var n = Math.max(a.length, b.length) - 1;
+    var L = 60, R = 790, T = 20, B = 250;
+    function X(i) { return L + (i / n) * (R - L); }
+    function Y(v) { return B - (v / 100) * (B - T); }
+    [0, 25, 50, 75, 100].forEach(function (v) {
+      svg.appendChild(el('line', { x1: L, x2: R, y1: Y(v), y2: Y(v), 'class': 'svg-grid' }));
+      svg.appendChild(el('text', { x: L - 8, y: Y(v) + 4, 'text-anchor': 'end', 'class': 'svg-muted' }, v + '%'));
+    });
+    for (var i = 0; i <= n; i += 4) {
+      svg.appendChild(el('text', { x: X(i), y: B + 18, 'text-anchor': 'middle', 'class': 'svg-muted' }, (i * 0.5) + ' s'));
+    }
+    svg.appendChild(el('text', { x: (L + R) / 2, y: B + 40, 'text-anchor': 'middle', 'class': 'svg-muted' }, 'Time (500 ms per cycle)'));
+    [[a, 'var(--z1)', 'Tunnel entry: 60% → 16% (28 steps)'], [b, 'var(--z3)', 'Tunnel exit: 16% → 95% (15 steps)']].forEach(function (s, k) {
+      var d = '';
+      s[0].forEach(function (v, i) {
+        d += (i ? 'H' + X(i).toFixed(1) + 'V' : 'M' + X(i).toFixed(1) + ',') + Y(v).toFixed(1);
+      });
+      svg.appendChild(el('path', { d: d, style: 'fill:none;stroke-width:2.2;stroke:' + s[1] }));
+      svg.appendChild(el('rect', { x: R - 270, y: T + 8 + k * 22, width: 12, height: 12, rx: 2, style: 'fill:' + s[1] }));
+      svg.appendChild(el('text', { x: R - 252, y: T + 18 + k * 22, 'class': 'svg-text' }, s[2]));
+    });
+  })();
+
+  // Calculator
+  (function () {
+    var lux = document.getElementById('in-lux'), cur = document.getElementById('in-cur'), ms = document.getElementById('in-ms');
+    var out = document.getElementById('calc-out');
+    function run() {
+      var l = parseFloat(lux.value), c = Math.round(parseFloat(cur.value)), p = parseFloat(ms.value);
+      if (!isFinite(l) || l < 0 || !isFinite(c) || c < 0 || c > 100 || !isFinite(p) || p <= 0) {
+        out.textContent = 'Enter lux ≥ 0, brightness 0..100 and a cycle time > 0.';
+        return;
+      }
+      var r = ramp(c, l), steps = r.seq.length - 1;
+      out.innerHTML = 'Zone <b>' + r.zone.name + '</b> · target <b>' + r.target + '%</b> · <b>' + steps +
+        '</b> steps · approx. <b>' + (steps * p / 1000).toFixed(1) + ' s</b>' +
+        '<div class="seq">' + r.seq.join(' → ') + '</div>';
+    }
+    [lux, cur, ms].forEach(function (i) { i.addEventListener('input', run); });
+    run();
+  })();
+})();
+</script>
+</body>
+</html>
