@@ -26,6 +26,7 @@
       "group": "root"
     },
     "update_interval_ms": 500,
+    "hysteresis_percent": 20.0,
     "sensor_error_timeout_sec": 300,
     "fallback_brightness": 50,
     "state_file": "/home/pi/als-dimmer/state.json",
