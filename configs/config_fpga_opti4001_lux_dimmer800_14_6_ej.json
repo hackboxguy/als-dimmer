@@ -1,0 +1,81 @@
+{
+  "_comment_variant": "14.6-inch FHD scan-mode EJ panel (pi-config-txt type 14.6-fhd-ej). Same Spartan-7 board, OPT4001 and dimmer800 output as config_fpga_opti4001_lux_dimmer800.json (14.6-fhd direct-drive and 12.3-NQ5); only the brightness-to-nits curve differs, so only sweep_table does. calibrations/dimmer800_14_6_ej.csv is a REFERENCE (golden-sample) sweep of one EJ unit, 2026-10-11: 1074 nits at 100 % against the shared table's 1187.",
+  "sensor": {
+    "type": "fpga_opti4001_lux",
+    "device": "/dev/i2c-1",
+    "address": "0x1D",
+    "scale_factor": 1.0
+  },
+
+  "output": {
+    "type": "dimmer800",
+    "device": "/dev/i2c-1",
+    "address": "0x1D"
+  },
+
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "hysteresis_percent": 20.0,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/home/pi/als-dimmer/state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": false
+  },
+
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 10],
+      "brightness_range": [15, 30],
+      "curve": "logarithmic",
+      "step_sizes": {"large_up": 5, "large_down": 3, "medium_up": 2, "medium_down": 1, "small_up": 1, "small_down": 1},
+      "error_thresholds": {"large": 20, "small": 5}
+    },
+    {
+      "name": "indoor",
+      "lux_range": [10, 500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": {"large_up": 8, "large_down": 4, "medium_up": 3, "medium_down": 2, "small_up": 1, "small_down": 1},
+      "error_thresholds": {"large": 25, "small": 8}
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": {"large_up": 10, "large_down": 5, "medium_up": 4, "medium_down": 2, "small_up": 2, "small_down": 1},
+      "error_thresholds": {"large": 30, "small": 10}
+    }
+  ],
+
+  "notification": {
+    "enabled": true,
+    "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
+  },
+
+  "calibration": {
+    "enabled": false,
+    "sample_duration_sec": 60,
+    "auto_adjust_zones": true
+  },
+
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/dimmer800_14_6_ej.csv"
+  }
+}
