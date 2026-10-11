@@ -1,4 +1,5 @@
 {
+  "_comment_encoding": "Output is dimmer2048 (binary, 0x000-0x800), not the dimmer800 (BCD 0-800) the file name says: the Spartan-7 bitstream multiplies register 0x35 as plain binary and has never decoded BCD, so BCD made the backlight a staircase with ~5.5 % jumps at every BCD hundreds boundary (12.5, 25, ... 100 %). Measured 2026-10-11: binary is linear, ~12 nits per 1 %. The file keeps its name because micropanel's pi-config-txt links it by name.",
   "_comment_variant": "14.6-inch FHD scan-mode EJ panel (pi-config-txt type 14.6-fhd-ej). Same Spartan-7 board, OPT4001 and dimmer800 output as config_fpga_opti4001_lux_dimmer800.json (14.6-fhd direct-drive and 12.3-NQ5); only the brightness-to-nits curve differs, so only sweep_table does. calibrations/dimmer800_14_6_ej.csv is a REFERENCE (golden-sample) sweep of one EJ unit, 2026-10-11: 1074 nits at 100 % against the shared table's 1187.",
   "sensor": {
     "type": "fpga_opti4001_lux",
@@ -8,7 +9,7 @@
   },
 
   "output": {
-    "type": "dimmer800",
+    "type": "dimmer2048",
     "device": "/dev/i2c-1",
     "address": "0x1D"
   },
