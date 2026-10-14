@@ -92,8 +92,15 @@ bool LdProfileController::writeReg(int reg, int value) {
 // One I2C_RDWR transaction (pointer write + repeated-start read), so another process on the bus
 // cannot move the slave's {page, reg} pointer between the two (see wp_adjust_restore.cpp).
 bool LdProfileController::readReg(int reg, int& value) {
-    uint8_t ptr[2] = {PAGE, static_cast<uint8_t>(reg)};
     uint8_t d = 0;
+    if (!readBlock(reg, &d, 1)) return false;
+    value = d;
+    return true;
+}
+
+// Burst read of `len` registers from `reg` in one I2C_RDWR transaction.
+bool LdProfileController::readBlock(int reg, uint8_t* data, int len) {
+    uint8_t ptr[2] = {PAGE, static_cast<uint8_t>(reg)};
     struct i2c_msg msgs[2];
     msgs[0].addr = static_cast<__u16>(cfg_.i2c_address);
     msgs[0].flags = 0;
@@ -101,14 +108,12 @@ bool LdProfileController::readReg(int reg, int& value) {
     msgs[0].buf = ptr;
     msgs[1].addr = static_cast<__u16>(cfg_.i2c_address);
     msgs[1].flags = I2C_M_RD;
-    msgs[1].len = 1;
-    msgs[1].buf = &d;
+    msgs[1].len = static_cast<__u16>(len);
+    msgs[1].buf = data;
     struct i2c_rdwr_ioctl_data xfer;
     xfer.msgs = msgs;
     xfer.nmsgs = 2;
-    if (ioctl(fd_, I2C_RDWR, &xfer) < 0) return false;
-    value = d;
-    return true;
+    return ioctl(fd_, I2C_RDWR, &xfer) >= 0;
 }
 
 std::string LdProfileController::activeProfile() const {
@@ -224,9 +229,16 @@ void LdProfileController::update(const std::string& zone_name) {
             return;
         }
         if (zone_name != zone_) {
+            // A zone is adopted once it has itself been detected for min_dwell_sec. If the room
+            // keeps flapping between other zones (none holds), the zone seen after 3 x dwell away
+            // from the current one is adopted (review v1/v2: neither rule alone covers both).
             if (!away_) { away_ = true; away_since_ = now; }
-            const auto held = std::chrono::duration_cast<std::chrono::seconds>(now - away_since_).count();
-            if (held >= cfg_.min_dwell_sec) {
+            if (zone_name != candidate_) { candidate_ = zone_name; candidate_since_ = now; }
+            using std::chrono::duration_cast;
+            using std::chrono::seconds;
+            const auto cand_held = duration_cast<seconds>(now - candidate_since_).count();
+            const auto away_held = duration_cast<seconds>(now - away_since_).count();
+            if (cand_held >= cfg_.min_dwell_sec || away_held >= 3 * cfg_.min_dwell_sec) {
                 LOG_INFO("ld_profile", "Zone '" << zone_name << "' (was '" << zone_ << "')"
                          << (dynamic_enabled_ ? ", ramping to its profile" : "; dynamic LD off"));
                 zone_ = zone_name;
@@ -235,6 +247,7 @@ void LdProfileController::update(const std::string& zone_name) {
             }
         } else {
             away_ = false;                                 // excursion ended before the dwell
+            candidate_.clear();
         }
     }
 
@@ -273,9 +286,20 @@ nlohmann::json LdProfileController::status() {
     j["current"] = cur;
     j["settled"] = settled;
     // FPGA backlight status: 0x46/0x47 multiplier in use (0x800 = 100 % brightness), 0x48 APL.
-    int b_hi = -1, b_lo = -1, apl = -1;
-    if (readReg(0x46, b_hi) && readReg(0x47, b_lo) && readReg(0x48, apl)) {
-        const int b = (b_hi << 8) | b_lo;
+    // One 3-byte burst from 0x46: the FPGA latches {B, APL} when the pointer lands on 0x46
+    // (v0x58), so B cannot tear during a ramp. Before v0x58 the burst still narrows the window.
+    // Accept the status only when two reads agree and B is a 12-bit value: the Pi<->FPGA transport
+    // corrupts reads that carry certain byte patterns (bench, v0x58: every read of 0x46 while
+    // B = 0x0667 came back shifted or with bit 7 dropped; docs/dynamic-local-dimming.md §11 N10).
+    uint8_t st[3] = {0, 0, 0}, st2[3] = {1, 1, 1};
+    bool ok = false;
+    for (int attempt = 0; attempt < 4 && !ok; ++attempt) {
+        ok = readBlock(0x46, st, 3) && readBlock(0x46, st2, 3) &&
+             st[0] == st2[0] && st[1] == st2[1] && st[2] == st2[2] && st[0] <= 0x0F;
+    }
+    if (ok) {
+        const int b = (st[0] << 8) | st[1];
+        const int apl = st[2];
         j["fpga_multiplier"] = b;
         j["fpga_multiplier_percent"] = b * 100.0 / 0x800;
         j["fpga_apl_percent"] = apl * 100.0 / 255;

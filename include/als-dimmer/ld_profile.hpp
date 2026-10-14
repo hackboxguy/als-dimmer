@@ -5,6 +5,7 @@
 #include "json.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 
 namespace als_dimmer {
@@ -63,6 +64,7 @@ private:
     bool openBus();
     bool writeReg(int reg, int value);
     bool readReg(int reg, int& value);
+    bool readBlock(int reg, uint8_t* data, int len);
     void computeTarget();
     void step(bool at_once);
     void verify();
@@ -76,6 +78,8 @@ private:
     std::string zone_;                           // zone whose profile is the target ("" = none yet)
     std::chrono::steady_clock::time_point away_since_;
     bool away_ = false;                          // detected zone differs from zone_
+    std::string candidate_;                      // zone detected while away, and since when
+    std::chrono::steady_clock::time_point candidate_since_;
     std::chrono::steady_clock::time_point last_verify_;
     int current_[LD_REGISTER_COUNT];             // last value written / read (-1 = unknown)
     int target_[LD_REGISTER_COUNT];              // -1 = not managed

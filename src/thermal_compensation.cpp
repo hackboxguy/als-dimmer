@@ -354,6 +354,7 @@ void ThermalCompensation::runOneTempCheck() {
         last_read_time_ = std::chrono::steady_clock::now();
         bool first_time = !has_reading_;
         has_reading_ = true;
+        ++read_seq_;
         consecutive_failures_ = 0;
         warned_about_sustained_failure_ = false;
 
@@ -440,6 +441,11 @@ bool ThermalCompensation::hasReading() const {
     auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::steady_clock::now() - last_read_time_).count();
     return age <= stale_threshold_ms;
+}
+
+uint64_t ThermalCompensation::readSeq() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return read_seq_;
 }
 
 double ThermalCompensation::lastTempC() const {

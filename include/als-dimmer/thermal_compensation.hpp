@@ -141,6 +141,13 @@ public:
      */
     int64_t lastReadAgeMs() const;
 
+    /**
+     * Number of successful readings so far. A consumer that must act once per
+     * reading (the thermal limiter) compares it with the value it saw last.
+     * Thread-safe.
+     */
+    uint64_t readSeq() const;
+
     // Metadata from the loaded factor table (constant after loadFactorTable).
     const std::string& label() const           { return label_; }
     const std::string& sourcePath() const      { return source_path_; }
@@ -196,6 +203,7 @@ private:
     double last_temp_c_ = 0.0;          // valid only when has_reading_ == true
     std::chrono::steady_clock::time_point last_read_time_;
     bool has_reading_ = false;
+    uint64_t read_seq_ = 0;             // successful readings so far (consumers act once per reading)
 
     // Failure tracking for log throttling (protected by mu_)
     int consecutive_failures_ = 0;

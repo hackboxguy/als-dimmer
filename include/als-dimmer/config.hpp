@@ -217,18 +217,22 @@ struct LdProfileConfig {
     LdProfile static_profile = {{16, 64, -1, 64, -1}};
 };
 
-// Thermal limiter (optional): regulates the brightness so that the backlight temperature stays at
-// or below start_c. Reads the temperature through the thermal_compensation poller (its
-// i2c_temp_source / temp_command); it needs no factor table. Each new reading above start_c lowers
-// the brightness factor by step_percent (floor min_percent) and suppresses the LD boost first;
-// below start_c - hysteresis_c it recovers by step_percent per reading.
+// Thermal limiter (optional): regulates the brightness so that the backlight temperature settles at
+// or just above start_c. Reads the temperature through the thermal_compensation poller (its
+// i2c_temp_source / temp_command); it needs no factor table. Proportional law on the mean of the
+// last two plausible readings: limit = clamp(100 - gain_percent_per_c * (T - start_c), min_percent,
+// 100), approached by at most step_percent per reading. The LD boost is off while T >= start_c and
+// returns below start_c - hysteresis_c.
 struct ThermalLimitConfig {
     bool enabled = false;
     double start_c = 60.0;
-    double hysteresis_c = 3.0;
-    int step_percent = 2;
+    double gain_percent_per_c = 8.0;   // brightness % per degC above start_c (plant: ~9 C per 100 %)
+    double hysteresis_c = 1.0;         // boost release band only
+    int step_percent = 2;              // slew limit per reading
     int min_percent = 50;
-    bool suppress_boost = true;        // first stage: LD boost off while hot
+    bool suppress_boost = true;        // LD boost off while hot
+    double valid_min_c = -40.0;        // readings outside this range are ignored
+    double valid_max_c = 110.0;
 };
 
 struct Config {

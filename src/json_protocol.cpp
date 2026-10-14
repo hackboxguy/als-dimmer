@@ -85,7 +85,8 @@ std::string generateStatusResponse(const std::string& mode,
                                    bool thermal_enabled,
                                    bool thermal_has_reading,
                                    double backlight_temp_c,
-                                   double thermal_factor) {
+                                   double thermal_factor,
+                                   const json& extra) {
     json data;
     data["mode"] = mode;  // Now accepts: "auto", "manual", or "manual_temporary"
     data["brightness"] = current_brightness;
@@ -110,6 +111,9 @@ std::string generateStatusResponse(const std::string& mode,
     } else {
         data["backlight_temp_c"] = nullptr;
         data["thermal_factor"] = nullptr;
+    }
+    for (auto it = extra.begin(); it != extra.end(); ++it) {
+        data[it.key()] = it.value();
     }
 
     return generateResponse(ResponseStatus::SUCCESS,

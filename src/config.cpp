@@ -525,6 +525,9 @@ Config Config::loadFromFile(const std::string& filename) {
         if (tl_json.contains("step_percent")) tl.step_percent = tl_json["step_percent"].get<int>();
         if (tl_json.contains("min_percent")) tl.min_percent = tl_json["min_percent"].get<int>();
         if (tl_json.contains("suppress_boost")) tl.suppress_boost = tl_json["suppress_boost"].get<bool>();
+        if (tl_json.contains("gain_percent_per_c")) tl.gain_percent_per_c = tl_json["gain_percent_per_c"].get<double>();
+        if (tl_json.contains("valid_min_c")) tl.valid_min_c = tl_json["valid_min_c"].get<double>();
+        if (tl_json.contains("valid_max_c")) tl.valid_max_c = tl_json["valid_max_c"].get<double>();
     }
 
     // Parse calibration configuration (optional)
@@ -771,6 +774,9 @@ void Config::validate() const {
     }
 
     if (thermal_limit.enabled) {
+        if (thermal_limit.gain_percent_per_c <= 0 || thermal_limit.valid_max_c <= thermal_limit.valid_min_c) {
+            throw ConfigError("thermal_limit: gain_percent_per_c > 0, valid_max_c > valid_min_c");
+        }
         if (thermal_limit.hysteresis_c < 0 || thermal_limit.step_percent < 1 ||
             thermal_limit.step_percent > 50 || thermal_limit.min_percent < 10 ||
             thermal_limit.min_percent > 100) {

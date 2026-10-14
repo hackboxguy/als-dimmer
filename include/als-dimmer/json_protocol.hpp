@@ -79,7 +79,8 @@ std::string generateStatusResponse(const std::string& mode,
                                    bool thermal_enabled = false,
                                    bool thermal_has_reading = false,
                                    double backlight_temp_c = 0.0,
-                                   double thermal_factor = 1.0);
+                                   double thermal_factor = 1.0,
+                                   const json& extra = json::object());
 
 // Generate config response (for GET_CONFIG command)
 std::string generateConfigResponse(const json& config_data);

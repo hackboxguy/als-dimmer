@@ -406,7 +406,15 @@ std::string processCommand(const std::string& command,
                         thermal.isEnabled(),
                         thermal_has_reading,
                         thermal_has_reading ? thermal.lastTempC() : 0.0,
-                        thermal_has_reading ? thermal.factor() : 1.0
+                        thermal_has_reading ? thermal.factor() : 1.0,
+                        // The backlight temperature is also read when only the thermal limiter
+                        // uses it (no compensation table): report it, and the limit, here too.
+                        thermal_limit.enabled()
+                            ? json{{"backlight_temp_c", thermal_has_reading ? json(thermal.lastTempC()) : json(nullptr)},
+                                   {"thermal_limit_percent", thermal_limit.factorPercent()},
+                                   {"thermal_limiting", thermal_limit.factorPercent() < 100 ||
+                                                         thermal_limit.boostSuppressed()}}
+                            : json::object()
                     );
                 }
 

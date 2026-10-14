@@ -461,7 +461,7 @@ of small content. Concept and measurements: pixelpipe-fpga `docs/dynamic-local-d
   "enabled": true,
   "min_dwell_sec": 5,
   "verify_interval_sec": 10,
-  "transition_steps": {"ld_alpha": 8, "pc_tune": 2, "bl_boost": 0},
+  "transition_steps": {"ld_alpha": 0, "pc_tune": 2, "bl_boost": 0},
   "static_profile": {"ld_alpha": 16, "bl_boost": 64, "pc_tune": 64},
   "profiles": {
     "night":   {"ld_alpha": 16,  "bl_boost": 64, "pc_tune": 64},
@@ -484,17 +484,20 @@ of small content. Concept and measurements: pixelpipe-fpga `docs/dynamic-local-d
 - **Zone:** the zone comes from the lux with the zone hysteresis, in AUTO and MANUAL brightness
   modes alike, because halo vs readability depends on the room. If the sensor is unavailable, the
   current profile stays.
-- **Switching:** the room must have been in another zone for `min_dwell_sec`. The registers then move by at most
+- **Switching:** a new zone is adopted once it has been detected for `min_dwell_sec`; if the room
+  keeps flapping between other zones, the zone seen after `3 × min_dwell_sec` away is adopted. The registers then move by at most
   `transition_steps` per control-loop iteration (default 500 ms; 0 = at once). From FPGA v0x57
-  the FPGA glides a lowered boost itself (`0x4B`), so `bl_boost` can be 0. The first profile after
+  the FPGA glides a lowered boost itself (`0x4B`) and from v0x58 also the alpha (1 step per 13 ms),
+  so `bl_boost` and `ld_alpha` can be 0 there. The first profile after
   daemon start is written at once.
 - **Upkeep:** every `verify_interval_sec` the registers are read back. A difference seen on two
   reads in a row (FPGA reboot or OTA activation, another tool) is taken over and the registers
   ramp back to the profile from there.
 - **Failure handling:** a register is dropped only after it read back 0 after a non-zero write
   three times in a row (a bitstream without it); any other read-back difference is retried. Reads
-  are atomic `I2C_RDWR` transactions, so other processes on the bus cannot move the FPGA's register
-  pointer in between. If `0x1E` does not answer, the feature disables itself; it is off unless
+  (here, in the white-point restore and in the `fpga_opti4001_lux` sensor) are atomic `I2C_RDWR`
+  transactions, so other processes on the bus cannot move the FPGA's register pointer in between.
+  The FPGA status `0x46..0x48` is read as one burst (FPGA v0x58 latches it on 0x46). If `0x1E` does not answer, the feature disables itself; it is off unless
   `enabled` is true.
 - **Dynamic LD switch:** `{"command":"set_ld_dynamic","params":{"enabled":false}}` makes the
   display use `static_profile` in every zone; the setting is stored in the state file
@@ -505,7 +508,7 @@ of small content. Concept and measurements: pixelpipe-fpga `docs/dynamic-local-d
 
 ### Thermal limiter (optional)
 
-Keeps the backlight temperature at or below `start_c`. It reads the temperature through the
+Keeps the backlight temperature at about `start_c`. It reads the temperature through the
 `thermal_compensation` poller (`i2c_temp_source` or `temp_command`; no factor table needed):
 
 ```json
@@ -514,19 +517,25 @@ Keeps the backlight temperature at or below `start_c`. It reads the temperature 
   "i2c_temp_source": {"device": "/dev/i2c-1", "address": "0x66", "register": "0x1002", "scale": 0.1}
 },
 "thermal_limit": {
-  "enabled": true, "start_c": 60.0, "hysteresis_c": 3.0,
+  "enabled": true, "start_c": 60.0, "gain_percent_per_c": 8.0, "hysteresis_c": 1.0,
   "step_percent": 2, "min_percent": 50, "suppress_boost": true
 }
 ```
 
-- Each reading at or above `start_c` turns the local-dimming boost off (`suppress_boost`) and lowers
-  a brightness limit by `step_percent` (floor `min_percent`). Each reading at or below
-  `start_c - hysteresis_c` raises it again by `step_percent`; in between it holds. The boost returns
-  when the limit is back at 100 % and the temperature is below the band.
+- Proportional law, evaluated once per **new** reading (poller sequence number): `T` = mean of the
+  last two plausible readings (outside `valid_min_c`..`valid_max_c`, default −40..110 °C, are
+  ignored; one bad read never acts). Target limit = `100 − gain_percent_per_c × (T − start_c)`,
+  clamped to `min_percent`..100; the limit moves towards it by at most `step_percent` per reading.
+  The brightness then settles where the temperature balances it, and recovers by itself when the
+  room cools (an integrator with a hysteresis band wound down to the floor and stayed there: the
+  backlight NTC is a slow plant, ~9 °C between idle and full white, τ ≈ 15 min on the 14.6").
+- The LD boost is off while `T ≥ start_c` (`suppress_boost`) and returns below
+  `start_c − hysteresis_c` once the limit is back at 100 %.
 - The limit scales the brightness target (AUTO: before the smooth transition; MANUAL: the output),
   so the user's setting stays as it is. With no or a stale reading there is no limiting.
-- `get_ld_status` reports `thermal_limit.{backlight_temp_c, brightness_limit_percent,
-  boost_suppressed, limiting}`.
+- `get_ld_status` reports `thermal_limit.{backlight_temp_c, backlight_temp_mean_c, target_percent,
+  brightness_limit_percent, boost_suppressed, limiting, rejected_readings}`; `get_status` carries
+  `backlight_temp_c`, `thermal_limit_percent` and `thermal_limiting` too.
 
 ### Thermal compensation (optional)
 
