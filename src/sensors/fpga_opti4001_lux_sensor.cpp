@@ -1,4 +1,5 @@
 #include "als-dimmer/interfaces.hpp"
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <cstring>
@@ -89,8 +90,14 @@ public:
             return -1.0f;
         }
 
+        // The FPGA's I2C slave corrupts reads that carry the byte 0x67 after the first byte
+        // (pixelpipe-fpga docs/dynamic-local-dimming.md §11 N10, review v3 §3): at lux values
+        // with a 0x67 byte (103, 359, 615, ... 26368..26623 ...) ~30 % of reads fail (EIO) or
+        // come back shifted / with bit 7 dropped. So: one retry on EIO, implausible values
+        // rejected, and the median of the last three good reads is returned.
         uint32_t lux_value = 0;
-        if (!readLuxRegister(lux_value)) {
+        if (!readLuxRegister(lux_value) && !readLuxRegister(lux_value)) {
+            if (history_count_ > 0) return median();       // keep the last good estimate
             healthy_ = false;
             return -1.0f;
         }
@@ -102,17 +109,25 @@ public:
             return -1.0f;
         }
 
-        const float lux = static_cast<float>(lux_value);
+        const float raw = static_cast<float>(lux_value);
+        if (raw > MAX_PLAUSIBLE_LUX) {
+            if (rejected_++ % 50 == 0) {
+                std::cerr << "[FPGA_OPT4001_LUX] Ignoring implausible lux " << lux_value
+                          << " (read corruption?)\n";
+            }
+            if (history_count_ > 0) return median();
+            healthy_ = false;
+            return -1.0f;
+        }
+        history_[history_pos_] = raw;
+        history_pos_ = (history_pos_ + 1) % 3;
+        if (history_count_ < 3) ++history_count_;
+        const float lux = median();
 
         static int debug_count = 0;
         if (debug_count++ < 10) {
             std::cout << "[FPGA_OPT4001_LUX] Lux u32: " << lux_value
                       << " -> Lux: " << lux << "\n";
-        }
-
-        if (lux > 120000.0f) {
-            std::cerr << "[FPGA_OPT4001_LUX] WARNING: lux out of expected SOT-5X3 range: "
-                      << lux << "\n";
         }
 
         healthy_ = true;
@@ -121,6 +136,14 @@ public:
 
     bool isHealthy() const override {
         return healthy_;
+    }
+
+    // Median of the last (up to) three good reads.
+    float median() const {
+        if (history_count_ == 1) return history_[0];
+        if (history_count_ == 2) return (history_[0] + history_[1]) / 2.0f;
+        float a = history_[0], b = history_[1], c = history_[2];
+        return std::max(std::min(a, b), std::min(std::max(a, b), c));
     }
 
     std::string getType() const override {
@@ -163,6 +186,11 @@ private:
 
     std::string device_;
     uint8_t address_;
+    static constexpr float MAX_PLAUSIBLE_LUX = 120000.0f;   // OPT4001 full scale is ~84k lux
+    float history_[3] = {0.0f, 0.0f, 0.0f};
+    int history_pos_ = 0;
+    int history_count_ = 0;
+    unsigned rejected_ = 0;
     int i2c_fd_;
     bool healthy_;
 };

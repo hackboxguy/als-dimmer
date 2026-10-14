@@ -86,12 +86,12 @@
   },
 
   "thermal_limit": {
-    "_comment": "Keeps the backlight at about start_c (proportional): limit = 100 - gain_percent_per_c x (T - start_c), floor min_percent, moved by at most step_percent per 10 s reading; T = mean of the last two plausible readings. LD boost off while T >= start_c, back below start_c - hysteresis_c. No reading = no limiting. Soak 2026-10-14: full white at the cap settles at ~58 C (room ~22 C), tau ~15 min; start_c is the owner's choice pending the panel's derating spec.",
+    "_comment": "Keeps the backlight at about start_c (proportional): limit = 100 - gain_percent_per_c x (T - start_c), floor min_percent, moved by at most step_percent per 10 s reading (1 %: each step is a 1 % brightness change; 1 % deadband on the target); T = mean of the last two plausible readings. LD boost off while T >= start_c, back below start_c - hysteresis_c. No reading = no limiting. Soak 2026-10-14: full white at the cap settles at ~58 C (room ~22 C), tau ~15 min; start_c is the owner's choice pending the panel's derating spec; choose it as (panel limit - expected residual): the closed loop settles (T_unlimited - start_c)/1.72 above start_c, the 50 % floor removes only ~4.5 C (review v3 §4).",
     "enabled": true,
     "start_c": 60.0,
     "gain_percent_per_c": 8.0,
     "hysteresis_c": 1.0,
-    "step_percent": 2,
+    "step_percent": 1,
     "min_percent": 50,
     "suppress_boost": true
   },

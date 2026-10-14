@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <sstream>
 
@@ -55,8 +56,13 @@ void ThermalLimiter::update(const ThermalCompensation& thermal) {
         target_ = over <= 0.0 ? 100
                 : std::max(cfg_.min_percent,
                            static_cast<int>(std::lround(100.0 - cfg_.gain_percent_per_c * over)));
-        if (factor_ > target_) factor_ = std::max(target_, factor_ - cfg_.step_percent);
-        else if (factor_ < target_) factor_ = std::min(target_, factor_ + cfg_.step_percent);
+        // 1 % deadband: the mean of two 0.1 C readings makes the target flip by 1 % at a constant
+        // temperature (review v3 N11); a 1 % brightness step every 10 s would be visible. Moving
+        // back to 100 % is always allowed.
+        if (std::abs(target_ - factor_) > 1 || target_ == 100) {
+            if (factor_ > target_) factor_ = std::max(target_, factor_ - cfg_.step_percent);
+            else if (factor_ < target_) factor_ = std::min(target_, factor_ + cfg_.step_percent);
+        }
 
         if (cfg_.suppress_boost) {
             if (t_mean_ >= cfg_.start_c) boost_suppressed_ = true;

@@ -288,14 +288,17 @@ nlohmann::json LdProfileController::status() {
     // FPGA backlight status: 0x46/0x47 multiplier in use (0x800 = 100 % brightness), 0x48 APL.
     // One 3-byte burst from 0x46: the FPGA latches {B, APL} when the pointer lands on 0x46
     // (v0x58), so B cannot tear during a ramp. Before v0x58 the burst still narrows the window.
-    // Accept the status only when two reads agree and B is a 12-bit value: the Pi<->FPGA transport
-    // corrupts reads that carry certain byte patterns (bench, v0x58: every read of 0x46 while
-    // B = 0x0667 came back shifted or with bit 7 dropped; docs/dynamic-local-dimming.md §11 N10).
+    // Single-byte reads: the FPGA's I2C slave corrupts a 0x67 byte only when it is not the first
+    // byte of a read (review v3 §3: 0 errors in 2 000 single-byte reads of any value, 30 % in
+    // bursts). 0x46 latches {B, APL} (v0x58), 0x47 comes from that snapshot, 0x48 re-latches
+    // (APL at most one frame newer). Two passes must agree and B must be 12-bit.
     uint8_t st[3] = {0, 0, 0}, st2[3] = {1, 1, 1};
+    auto read3 = [this](uint8_t* d) {
+        return readBlock(0x46, &d[0], 1) && readBlock(0x47, &d[1], 1) && readBlock(0x48, &d[2], 1);
+    };
     bool ok = false;
     for (int attempt = 0; attempt < 4 && !ok; ++attempt) {
-        ok = readBlock(0x46, st, 3) && readBlock(0x46, st2, 3) &&
-             st[0] == st2[0] && st[1] == st2[1] && st[2] == st2[2] && st[0] <= 0x0F;
+        ok = read3(st) && read3(st2) && st[0] == st2[0] && st[1] == st2[1] && st[0] <= 0x0F;
     }
     if (ok) {
         const int b = (st[0] << 8) | st[1];
