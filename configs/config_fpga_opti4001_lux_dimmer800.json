@@ -1,4 +1,5 @@
 {
+  "_comment_encoding": "12.3-inch NQ5 (Spartan-7 scan). Output is dimmer2048 (binary, 0x000-0x800), not the dimmer800 (BCD 0-800) the file name says: the Spartan-7 bitstream multiplies register 0x35 as plain binary, so BCD gave a staircase (same fix as the 14.6-inch configs, 2ab724d). The file keeps its name because micropanel links it by name. sweep_table calibrations/dimmer800_12_3_nq5.csv was measured through the binary path on 2026-10-14 (FPGA v0x5A, dynamic local dimming OFF = the fixed neutral profile: the nits of full white also depend on the profile boost).",
   "sensor": {
     "type": "fpga_opti4001_lux",
     "device": "/dev/i2c-1",
@@ -7,7 +8,7 @@
   },
 
   "output": {
-    "type": "dimmer800",
+    "type": "dimmer2048",
     "device": "/dev/i2c-1",
     "address": "0x1D"
   },
@@ -107,6 +108,6 @@
 
   "brightness_to_nits": {
     "enabled": true,
-    "sweep_table": "calibrations/dimmer800.csv"
+    "sweep_table": "calibrations/dimmer800_12_3_nq5.csv"
   }
 }
