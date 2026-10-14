@@ -97,9 +97,7 @@ public:
         // rejected, and the median of the last three good reads is returned.
         uint32_t lux_value = 0;
         if (!readLuxRegister(lux_value) && !readLuxRegister(lux_value)) {
-            if (history_count_ > 0) return median();       // keep the last good estimate
-            healthy_ = false;
-            return -1.0f;
+            return badRead();
         }
 
         if (lux_value == INVALID_LUX) {
@@ -115,10 +113,9 @@ public:
                 std::cerr << "[FPGA_OPT4001_LUX] Ignoring implausible lux " << lux_value
                           << " (read corruption?)\n";
             }
-            if (history_count_ > 0) return median();
-            healthy_ = false;
-            return -1.0f;
+            return badRead();
         }
+        fail_streak_ = 0;
         history_[history_pos_] = raw;
         history_pos_ = (history_pos_ + 1) % 3;
         if (history_count_ < 3) ++history_count_;
@@ -136,6 +133,15 @@ public:
 
     bool isHealthy() const override {
         return healthy_;
+    }
+
+    // A failed or rejected read: bridge isolated ones with the last median, but after
+    // MAX_FAIL_STREAK in a row report the sensor unhealthy so the daemon's watchdog can
+    // demote to MANUAL (review v4 N19: a dead bus looked healthy for 24 min).
+    float badRead() {
+        if (++fail_streak_ < MAX_FAIL_STREAK && history_count_ > 0) return median();
+        healthy_ = false;
+        return -1.0f;
     }
 
     // Median of the last (up to) three good reads.
@@ -191,6 +197,8 @@ private:
     int history_pos_ = 0;
     int history_count_ = 0;
     unsigned rejected_ = 0;
+    static constexpr int MAX_FAIL_STREAK = 6;               // 3 s at the 500 ms loop
+    int fail_streak_ = 0;
     int i2c_fd_;
     bool healthy_;
 };
