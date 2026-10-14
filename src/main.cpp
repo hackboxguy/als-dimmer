@@ -13,6 +13,7 @@
 #include "als-dimmer/brightness_to_nits_lut.hpp"
 #include "als-dimmer/thermal_compensation.hpp"
 #include "als-dimmer/wp_adjust_restore.hpp"
+#include "als-dimmer/ld_profile.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <fstream>
@@ -799,6 +800,14 @@ int main(int argc, char* argv[]) {
                  "slave; skipping legacy wpx/wpy/wpz restore");
     }
 
+    // Day/night local-dimming profile (pixelpipe FPGA, opt-in): the detected lux zone selects
+    // the LD alpha / boost / PC registers on the new slave (ld_profile.hpp).
+    std::unique_ptr<als_dimmer::LdProfileController> ld_profile;
+    if (config.ld_profiles.enabled) {
+        ld_profile = std::make_unique<als_dimmer::LdProfileController>(config.ld_profiles,
+                                                                       config.output.device);
+    }
+
     // Load brightness->nits calibration table (optional). Daemon runs identically
     // when this is absent or fails to load - just without absolute-brightness API.
     als_dimmer::BrightnessToNitsLut b2n_lut;
@@ -998,6 +1007,13 @@ int main(int argc, char* argv[]) {
             // Sensor available but read skipped (minimal_i2c in MANUAL); keep
             // the watchdog timer fresh so it doesn't fire on the next AUTO read.
             last_sensor_healthy_time = std::chrono::steady_clock::now();
+        }
+
+        // Local-dimming profile follows the ambient zone in every brightness mode
+        // ("" = no lux this iteration: keep the current profile).
+        if (ld_profile) {
+            ld_profile->update((current_lux >= 0 && zone_mapper)
+                                   ? zone_mapper->getCurrentZoneName(current_lux) : std::string());
         }
 
         // Control logic based on operating mode

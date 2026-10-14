@@ -1,6 +1,7 @@
 #ifndef ALS_DIMMER_CONFIG_HPP
 #define ALS_DIMMER_CONFIG_HPP
 
+#include <map>
 #include <string>
 #include <vector>
 #include <stdexcept>
@@ -193,6 +194,27 @@ struct WhitePointCalibrationConfig {
     WpAdjustCalibrationConfig wp_adjust;
 };
 
+// Day/night local-dimming profiles (pixelpipe FPGA, new slave 0x1E page 0; see
+// ld_profile.hpp). Each profile is keyed by a zone name from "zones" and sets any
+// subset of the LD registers; a value of -1 = leave that register alone.
+enum LdRegister { LD_ALPHA = 0, PC_TUNE, LED_GAIN, BL_BOOST, BL_RISE, LD_REGISTER_COUNT };
+
+struct LdProfile {
+    int value[LD_REGISTER_COUNT] = {-1, -1, -1, -1, -1};
+};
+
+struct LdProfileConfig {
+    bool enabled = false;              // opt-in per display config
+    std::string i2c_device;            // empty = reuse output.device
+    int i2c_address = 0x1E;            // FPGA new slave (7-bit)
+    int min_dwell_sec = 5;             // a new zone must hold this long before its profile is written
+    int verify_interval_sec = 10;      // re-read + rewrite (FPGA reboot / OTA activation)
+    // Max change per control-loop iteration when moving to a new profile (0 = at once).
+    // Defaults at 500 ms/iteration: alpha 128->16 in 7 s, boost 90->64 in 6.5 s.
+    int transition_step[LD_REGISTER_COUNT] = {8, 2, 4, 2, 0};
+    std::map<std::string, LdProfile> profiles;   // zone name -> registers
+};
+
 struct Config {
     SensorConfig sensor;
     OutputConfig output;
@@ -203,6 +225,7 @@ struct Config {
     BrightnessToNitsConfig brightness_to_nits;
     ThermalCompensationConfig thermal_compensation;
     WhitePointCalibrationConfig white_point_calibration;
+    LdProfileConfig ld_profiles;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);

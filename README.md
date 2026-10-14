@@ -449,6 +449,50 @@ sanity window, and tolerates "commit pending until video starts" (the FPGA
 latches the update at the first vsync). All failures log and continue. Contract
 reference: `fpga-wp-adjust` `docs/i2c-master-sw-integration-guideline.md`.
 
+### Day/night local-dimming profile (pixelpipe FPGA, optional)
+
+On pixelpipe FPGA displays with dynamic local dimming (14.6" direct-drive from FPGA v0x56), the
+detected lux **zone** also selects a local-dimming profile: a few registers on the FPGA's new I2C
+slave (`0x1E`, page 0). At night the profile keeps halo low; outdoors it maximises the brightness
+of small content. Concept and measurements: pixelpipe-fpga `docs/dynamic-local-dimming.md`.
+
+```json
+"local_dimming_profiles": {
+  "enabled": true,
+  "min_dwell_sec": 5,
+  "verify_interval_sec": 10,
+  "transition_steps": {"ld_alpha": 8, "pc_tune": 2, "bl_boost": 2},
+  "profiles": {
+    "night":   {"ld_alpha": 16,  "bl_boost": 64, "pc_tune": 64},
+    "indoor":  {"ld_alpha": 48,  "bl_boost": 77, "pc_tune": 64},
+    "outdoor": {"ld_alpha": 128, "bl_boost": 90, "pc_tune": 83}
+  }
+}
+```
+
+| Field | Register | Meaning |
+|---|---|---|
+| `ld_alpha` | `0x31` | LD max/avg blend; 16 = FPGA default; higher = small content brighter, more halo |
+| `pc_tune` | `0x33` | pixel-compensation `{gamma_en, gain/64}`; 64 = 1.0x |
+| `bl_boost` | `0x49` | low-APL boost, /64; 64 = off |
+| `led_gain` | `0x43` | LED gain, /128 (normally left at the FPGA default) |
+| `bl_rise` | `0x4A` | boost rise per frame (normally left at the FPGA default) |
+
+- Profile names must match `zones[].name`. A profile sets only the registers it lists; values are
+  raw register bytes (integers or `"0x.."` strings).
+- **Zone:** the zone comes from the lux with the zone hysteresis, in AUTO and MANUAL brightness
+  modes alike, because halo vs readability depends on the room. If the sensor is unavailable, the
+  current profile stays.
+- **Switching:** a new zone must hold for `min_dwell_sec`. The registers then move by at most
+  `transition_steps` per control-loop iteration (default 500 ms; 0 = at once); the FPGA would
+  otherwise apply a lowered boost as a visible brightness step. The first profile after daemon
+  start is written at once.
+- **Upkeep:** every `verify_interval_sec` the registers are read back and rewritten if they differ.
+  This covers an FPGA reboot or OTA activation, which powers them up at their defaults.
+- **Failure handling:** a register that does not hold a written value (older bitstream) is dropped
+  with one warning. If `0x1E` does not answer, the feature disables itself; it is off unless
+  `enabled` is true.
+
 ### Thermal compensation (optional)
 
 The brightness-to-nits LUT captures the panel's response at the temperature

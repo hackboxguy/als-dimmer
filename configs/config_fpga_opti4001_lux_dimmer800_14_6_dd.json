@@ -64,6 +64,19 @@
     }
   ],
 
+  "local_dimming_profiles": {
+    "_comment": "Day/night local dimming (pixelpipe-fpga docs/dynamic-local-dimming.md step 3; FPGA v0x56+). The detected zone selects raw FPGA 0x1E page-0 registers: ld_alpha 0x31 (LD max/avg blend, 16 = baked default; higher = small content brighter, more halo), pc_tune 0x33 (pixel-compensation gain/64, 64 = 1.0x), bl_boost 0x49 (low-APL boost on the LED gain, 64 = off, 90 = up to 2x GD), led_gain 0x43, bl_rise 0x4A. A zone must hold min_dwell_sec before its profile is used; registers then ramp by transition_steps per 500 ms iteration. Night: low halo. Outdoor: maximum readability.",
+    "enabled": true,
+    "min_dwell_sec": 5,
+    "verify_interval_sec": 10,
+    "transition_steps": {"ld_alpha": 8, "pc_tune": 2, "bl_boost": 2},
+    "profiles": {
+      "night":   {"ld_alpha": 16,  "bl_boost": 64, "pc_tune": 64},
+      "indoor":  {"ld_alpha": 48,  "bl_boost": 77, "pc_tune": 64},
+      "outdoor": {"ld_alpha": 128, "bl_boost": 90, "pc_tune": 83}
+    }
+  },
+
   "notification": {
     "enabled": true,
     "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"

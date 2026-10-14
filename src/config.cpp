@@ -445,6 +445,61 @@ Config Config::loadFromFile(const std::string& filename) {
         }
     }
 
+    // Parse local_dimming_profiles (optional, pixelpipe FPGA day/night LD profile).
+    // Values are raw register bytes (integers or hex strings); see ld_profile.hpp.
+    if (j.contains("local_dimming_profiles")) {
+        auto& ld_json = j["local_dimming_profiles"];
+        auto& ld = config.ld_profiles;
+        auto parse_int_auto = [](const json& item) -> int {
+            if (item.is_string()) {
+                return static_cast<int>(std::stol(item.get<std::string>(), nullptr, 0));
+            }
+            return item.get<int>();
+        };
+        if (ld_json.contains("enabled")) ld.enabled = ld_json["enabled"].get<bool>();
+        if (ld_json.contains("i2c_device")) ld.i2c_device = ld_json["i2c_device"].get<std::string>();
+        if (ld_json.contains("i2c_address")) ld.i2c_address = parse_int_auto(ld_json["i2c_address"]);
+        if (ld_json.contains("min_dwell_sec")) ld.min_dwell_sec = ld_json["min_dwell_sec"].get<int>();
+        if (ld_json.contains("verify_interval_sec")) ld.verify_interval_sec = ld_json["verify_interval_sec"].get<int>();
+        static const char* const keys[LD_REGISTER_COUNT] = {
+            "ld_alpha", "pc_tune", "led_gain", "bl_boost", "bl_rise"};
+        if (ld_json.contains("transition_steps")) {
+            for (auto f = ld_json["transition_steps"].begin(); f != ld_json["transition_steps"].end(); ++f) {
+                if (f.key().rfind("_", 0) == 0) continue;
+                int idx = -1;
+                for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+                    if (f.key() == keys[k]) idx = k;
+                }
+                if (idx < 0) {
+                    throw ConfigError("local_dimming_profiles.transition_steps: unknown field '" + f.key() + "'");
+                }
+                ld.transition_step[idx] = parse_int_auto(f.value());
+            }
+        }
+        if (ld_json.contains("profiles")) {
+            for (auto it = ld_json["profiles"].begin(); it != ld_json["profiles"].end(); ++it) {
+                if (!it.value().is_object()) {
+                    throw ConfigError("local_dimming_profiles.profiles." + it.key() + " must be an object");
+                }
+                LdProfile prof;
+                for (auto f = it.value().begin(); f != it.value().end(); ++f) {
+                    if (f.key().rfind("_", 0) == 0) continue;            // "_comment" etc.
+                    int idx = -1;
+                    for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+                        if (f.key() == keys[k]) idx = k;
+                    }
+                    if (idx < 0) {
+                        throw ConfigError("local_dimming_profiles.profiles." + it.key() +
+                                          ": unknown field '" + f.key() +
+                                          "' (ld_alpha, pc_tune, led_gain, bl_boost, bl_rise)");
+                    }
+                    prof.value[idx] = parse_int_auto(f.value());
+                }
+                ld.profiles[it.key()] = prof;
+            }
+        }
+    }
+
     // Parse calibration configuration (optional)
     if (j.contains("calibration")) {
         auto& calib_json = j["calibration"];
@@ -649,6 +704,37 @@ void Config::validate() const {
         white_point_calibration.file_path.empty()) {
         throw ConfigError("white_point_calibration.file_path cannot be empty when enabled");
     }
+    if (ld_profiles.enabled) {
+        if (ld_profiles.i2c_address < 0x03 || ld_profiles.i2c_address > 0x77) {
+            throw ConfigError("local_dimming_profiles.i2c_address must be a 7-bit address");
+        }
+        if (ld_profiles.min_dwell_sec < 0 || ld_profiles.verify_interval_sec < 1) {
+            throw ConfigError("local_dimming_profiles: min_dwell_sec >= 0, verify_interval_sec >= 1");
+        }
+        for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+            if (ld_profiles.transition_step[k] < 0 || ld_profiles.transition_step[k] > 255) {
+                throw ConfigError("local_dimming_profiles.transition_steps must be 0..255");
+            }
+        }
+        if (ld_profiles.profiles.empty()) {
+            throw ConfigError("local_dimming_profiles.enabled but no profiles");
+        }
+        for (const auto& p : ld_profiles.profiles) {
+            bool known = false;
+            for (const auto& z : zones) known = known || (z.name == p.first);
+            if (!known) {
+                throw ConfigError("local_dimming_profiles.profiles." + p.first +
+                                  ": no zone with that name");
+            }
+            for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+                if (p.second.value[k] < -1 || p.second.value[k] > 255) {
+                    throw ConfigError("local_dimming_profiles.profiles." + p.first +
+                                      ": register values must be 0..255");
+                }
+            }
+        }
+    }
+
     if (white_point_calibration.wp_adjust.enabled) {
         const auto& wpa = white_point_calibration.wp_adjust;
         if (wpa.file_path.empty()) {
