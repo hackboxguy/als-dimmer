@@ -25,6 +25,7 @@ set(CORE_SOURCES
     src/thermal_compensation.cpp
     src/wp_adjust_restore.cpp
     src/ld_profile.cpp
+    src/thermal_limit.cpp
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
     src/sensors/fpga_opti4001_sensor.cpp

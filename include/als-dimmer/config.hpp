@@ -213,6 +213,22 @@ struct LdProfileConfig {
     // Defaults at 500 ms/iteration: alpha 128->16 in 7 s, boost 90->64 in 6.5 s.
     int transition_step[LD_REGISTER_COUNT] = {8, 2, 4, 2, 0};
     std::map<std::string, LdProfile> profiles;   // zone name -> registers
+    // Used when the user switches dynamic LD off (set_ld_dynamic): the FPGA's neutral values.
+    LdProfile static_profile = {{16, 64, -1, 64, -1}};
+};
+
+// Thermal limiter (optional): regulates the brightness so that the backlight temperature stays at
+// or below start_c. Reads the temperature through the thermal_compensation poller (its
+// i2c_temp_source / temp_command); it needs no factor table. Each new reading above start_c lowers
+// the brightness factor by step_percent (floor min_percent) and suppresses the LD boost first;
+// below start_c - hysteresis_c it recovers by step_percent per reading.
+struct ThermalLimitConfig {
+    bool enabled = false;
+    double start_c = 60.0;
+    double hysteresis_c = 3.0;
+    int step_percent = 2;
+    int min_percent = 50;
+    bool suppress_boost = true;        // first stage: LD boost off while hot
 };
 
 struct Config {
@@ -226,6 +242,7 @@ struct Config {
     ThermalCompensationConfig thermal_compensation;
     WhitePointCalibrationConfig white_point_calibration;
     LdProfileConfig ld_profiles;
+    ThermalLimitConfig thermal_limit;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);

@@ -25,6 +25,8 @@ enum class CommandType {
     GET_ABSOLUTE_BRIGHTNESS,
     SET_ABSOLUTE_BRIGHTNESS,
     GET_CALIBRATION_INFO,
+    GET_LD_STATUS,      // dynamic local dimming + thermal limiter status
+    SET_LD_DYNAMIC,     // params {"enabled": bool}: dynamic local dimming switch (persisted)
     UNKNOWN
 };
 

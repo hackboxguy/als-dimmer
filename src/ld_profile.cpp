@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 
 namespace als_dimmer {
@@ -19,6 +20,8 @@ namespace {
 const int REG_ADDR[LD_REGISTER_COUNT]         = {0x31, 0x33, 0x43, 0x49, 0x4A};
 const char* const REG_NAME[LD_REGISTER_COUNT] = {"ld_alpha", "pc_tune", "led_gain", "bl_boost", "bl_rise"};
 constexpr uint8_t PAGE = 0x00;
+constexpr int BOOST_OFF = 64;          // 0x49: 64 = 1.0x
+constexpr int ZERO_READS_TO_DROP = 3;  // "reads 0 after a non-zero write" this often in a row
 
 std::string describe(const int* v) {
     std::ostringstream os;
@@ -36,7 +39,10 @@ std::string describe(const int* v) {
 LdProfileController::LdProfileController(const LdProfileConfig& cfg,
                                          const std::string& fallback_i2c_device)
     : cfg_(cfg), device_(cfg.i2c_device.empty() ? fallback_i2c_device : cfg.i2c_device) {
-    for (int k = 0; k < LD_REGISTER_COUNT; ++k) current_[k] = target_[k] = -1;
+    for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+        current_[k] = target_[k] = -1;
+        zero_reads_[k] = 0;
+    }
     if (!cfg_.enabled || !openBus()) {
         disabled_ = true;
         return;
@@ -55,6 +61,7 @@ LdProfileController::LdProfileController(const LdProfileConfig& cfg,
     for (const auto& p : cfg_.profiles) {
         LOG_INFO("ld_profile", "  " << p.first << ": " << describe(p.second.value));
     }
+    LOG_INFO("ld_profile", "  static (dynamic LD off): " << describe(cfg_.static_profile.value));
 }
 
 LdProfileController::~LdProfileController() {
@@ -82,19 +89,65 @@ bool LdProfileController::writeReg(int reg, int value) {
     return write(fd_, buf, sizeof(buf)) == static_cast<ssize_t>(sizeof(buf));
 }
 
+// One I2C_RDWR transaction (pointer write + repeated-start read), so another process on the bus
+// cannot move the slave's {page, reg} pointer between the two (see wp_adjust_restore.cpp).
 bool LdProfileController::readReg(int reg, int& value) {
     uint8_t ptr[2] = {PAGE, static_cast<uint8_t>(reg)};
-    if (write(fd_, ptr, sizeof(ptr)) != static_cast<ssize_t>(sizeof(ptr))) return false;
     uint8_t d = 0;
-    if (read(fd_, &d, 1) != 1) return false;
+    struct i2c_msg msgs[2];
+    msgs[0].addr = static_cast<__u16>(cfg_.i2c_address);
+    msgs[0].flags = 0;
+    msgs[0].len = sizeof(ptr);
+    msgs[0].buf = ptr;
+    msgs[1].addr = static_cast<__u16>(cfg_.i2c_address);
+    msgs[1].flags = I2C_M_RD;
+    msgs[1].len = 1;
+    msgs[1].buf = &d;
+    struct i2c_rdwr_ioctl_data xfer;
+    xfer.msgs = msgs;
+    xfer.nmsgs = 2;
+    if (ioctl(fd_, I2C_RDWR, &xfer) < 0) return false;
     value = d;
     return true;
 }
 
-// Move every register of the target profile one step (or all the way when `first`, or when
-// the register's step is 0) and read it back. A register that does not hold the written value
-// is not implemented by this bitstream: warn once, stop using it.
-void LdProfileController::step(bool first) {
+std::string LdProfileController::activeProfile() const {
+    if (!dynamic_enabled_) return "static";
+    return zone_;
+}
+
+// Target = static profile (dynamic LD off) or the zone's profile, then the thermal override.
+void LdProfileController::computeTarget() {
+    const LdProfile* p = nullptr;
+    if (!dynamic_enabled_) {
+        p = &cfg_.static_profile;
+    } else {
+        auto it = cfg_.profiles.find(zone_);
+        if (it != cfg_.profiles.end()) p = &it->second;
+    }
+    for (int k = 0; k < LD_REGISTER_COUNT; ++k) target_[k] = p ? p->value[k] : -1;
+    if (boost_suppressed_) target_[BL_BOOST] = BOOST_OFF;
+    settled_logged_ = false;
+}
+
+void LdProfileController::setDynamicEnabled(bool enabled) {
+    if (enabled == dynamic_enabled_) return;
+    dynamic_enabled_ = enabled;
+    LOG_INFO("ld_profile", "Dynamic local dimming " << (enabled ? "ON" : "OFF")
+             << " -> profile '" << activeProfile() << "'");
+    if (!disabled_) computeTarget();
+}
+
+void LdProfileController::setBoostSuppressed(bool suppressed) {
+    if (suppressed == boost_suppressed_) return;
+    boost_suppressed_ = suppressed;
+    LOG_INFO("ld_profile", "Boost " << (suppressed ? "suppressed (thermal)" : "released"));
+    if (!disabled_) computeTarget();
+}
+
+// Move every managed register one step towards the target (all the way when `at_once`, or when
+// the register's step is 0) and read it back.
+void LdProfileController::step(bool at_once) {
     bool settled = true;
     for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
         if (target_[k] < 0 || (unsupported_mask_ & (1 << k))) continue;
@@ -106,7 +159,7 @@ void LdProfileController::step(bool first) {
         if (current_[k] == target_[k]) continue;
         int next = target_[k];
         const int s = cfg_.transition_step[k];
-        if (!first && s > 0 && std::abs(target_[k] - current_[k]) > s) {
+        if (!at_once && s > 0 && std::abs(target_[k] - current_[k]) > s) {
             next = current_[k] + (target_[k] > current_[k] ? s : -s);
         }
         int rb = -1;
@@ -115,33 +168,43 @@ void LdProfileController::step(bool first) {
             continue;
         }
         if (rb != next) {
-            unsupported_mask_ |= (1 << k);
-            LOG_WARN("ld_profile", REG_NAME[k] << " (0x" << std::hex << REG_ADDR[k] << std::dec
-                     << ") reads back " << rb << " after writing " << next
-                     << ": not in this bitstream, dropped from the profiles");
+            settled = false;
+            // An unstored register (bitstream without it) reads 0. Anything else is transport noise.
+            if (rb == 0 && next != 0 && ++zero_reads_[k] >= ZERO_READS_TO_DROP) {
+                unsupported_mask_ |= (1 << k);
+                LOG_WARN("ld_profile", REG_NAME[k] << " (0x" << std::hex << REG_ADDR[k] << std::dec
+                         << ") reads back 0 after writing " << next << " " << ZERO_READS_TO_DROP
+                         << " times: not in this bitstream, dropped from the profiles");
+            } else {
+                LOG_DEBUG("ld_profile", REG_NAME[k] << " read back " << rb << " after writing "
+                          << next << "; retrying");
+            }
             continue;
         }
+        zero_reads_[k] = 0;
         current_[k] = next;
         if (next != target_[k]) settled = false;
     }
     if (settled && !settled_logged_) {
         settled_logged_ = true;
-        LOG_INFO("ld_profile", "Profile '" << target_zone_ << "' in place: " << describe(target_));
+        LOG_INFO("ld_profile", "Profile '" << activeProfile() << "' in place: " << describe(target_));
     }
 }
 
+// Re-read the managed registers. A difference must be seen twice in a row (one corrupt read must
+// not turn a ramp into a step); then the controller takes the FPGA's value and ramps from there.
 void LdProfileController::verify() {
     for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
         if (current_[k] < 0 || (unsupported_mask_ & (1 << k))) continue;
-        int rb = -1;
+        int rb = -1, rb2 = -1;
         if (!readReg(REG_ADDR[k], rb)) return;             // display off: try again later
-        if (rb != current_[k]) {
-            LOG_INFO("ld_profile", REG_NAME[k] << " reads " << rb << " instead of " << current_[k]
-                     << " (FPGA restarted?); re-applying '" << target_zone_ << "'");
-            for (int j = 0; j < LD_REGISTER_COUNT; ++j) current_[j] = -1;
-            step(true);
-            return;
-        }
+        if (rb == current_[k]) continue;
+        if (!readReg(REG_ADDR[k], rb2) || rb2 != rb) continue;
+        LOG_INFO("ld_profile", REG_NAME[k] << " reads " << rb << " instead of " << current_[k]
+                 << " (FPGA restarted or another tool wrote it); ramping '" << activeProfile()
+                 << "' back from there");
+        current_[k] = rb;
+        settled_logged_ = false;
     }
 }
 
@@ -149,37 +212,78 @@ void LdProfileController::update(const std::string& zone_name) {
     if (disabled_) return;
     const auto now = std::chrono::steady_clock::now();
 
-    if (!zone_name.empty() && zone_name != target_zone_ && cfg_.profiles.count(zone_name)) {
-        if (zone_name != candidate_) {
-            candidate_ = zone_name;
-            candidate_since_ = now;
-        }
-        const auto held = std::chrono::duration_cast<std::chrono::seconds>(now - candidate_since_).count();
-        // The first profile (daemon start) applies at once; later changes wait out the dwell.
-        const bool first = target_zone_.empty();
-        if (first || held >= cfg_.min_dwell_sec) {
-            LOG_INFO("ld_profile", "Zone '" << zone_name << "' -> profile "
-                     << describe(cfg_.profiles.at(zone_name).value)
-                     << (first ? "" : " (was '" + target_zone_ + "', ramping)"));
-            target_zone_ = zone_name;
-            candidate_.clear();
-            for (int k = 0; k < LD_REGISTER_COUNT; ++k) target_[k] = cfg_.profiles.at(zone_name).value[k];
-            settled_logged_ = first;
-            step(first);
+    if (!zone_name.empty() && cfg_.profiles.count(zone_name)) {
+        if (zone_.empty()) {
+            // First zone after start: applies at once.
+            zone_ = zone_name;
+            LOG_INFO("ld_profile", "Zone '" << zone_ << "'"
+                     << (dynamic_enabled_ ? "" : " (dynamic LD off: static profile)"));
+            computeTarget();
+            step(true);
             last_verify_ = now;
             return;
         }
-    } else if (zone_name == target_zone_) {
-        candidate_.clear();                                // brief excursion ended before the dwell
+        if (zone_name != zone_) {
+            if (!away_) { away_ = true; away_since_ = now; }
+            const auto held = std::chrono::duration_cast<std::chrono::seconds>(now - away_since_).count();
+            if (held >= cfg_.min_dwell_sec) {
+                LOG_INFO("ld_profile", "Zone '" << zone_name << "' (was '" << zone_ << "')"
+                         << (dynamic_enabled_ ? ", ramping to its profile" : "; dynamic LD off"));
+                zone_ = zone_name;
+                away_ = false;
+                computeTarget();
+            }
+        } else {
+            away_ = false;                                 // excursion ended before the dwell
+        }
     }
 
-    if (target_zone_.empty()) return;
+    if (zone_.empty()) {
+        if (dynamic_enabled_) return;                      // no zone yet: nothing to apply
+        bool have_target = false;                          // dynamic off: the static profile needs no zone
+        for (int k = 0; k < LD_REGISTER_COUNT; ++k) have_target = have_target || target_[k] >= 0;
+        if (!have_target) computeTarget();
+    }
     step(false);
     if (std::chrono::duration_cast<std::chrono::seconds>(now - last_verify_).count() >=
             cfg_.verify_interval_sec) {
         last_verify_ = now;
         verify();
     }
+}
+
+nlohmann::json LdProfileController::status() {
+    nlohmann::json j;
+    j["available"] = !disabled_;
+    j["dynamic_enabled"] = dynamic_enabled_;
+    j["profile"] = activeProfile();
+    j["zone"] = zone_;
+    j["boost_suppressed"] = boost_suppressed_;
+    if (disabled_) return j;
+    nlohmann::json tgt = nlohmann::json::object(), cur = nlohmann::json::object();
+    bool settled = true;
+    for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+        if (target_[k] < 0) continue;
+        tgt[REG_NAME[k]] = target_[k];
+        if (unsupported_mask_ & (1 << k)) { cur[REG_NAME[k]] = nullptr; continue; }
+        cur[REG_NAME[k]] = current_[k];
+        settled = settled && current_[k] == target_[k];
+    }
+    j["target"] = tgt;
+    j["current"] = cur;
+    j["settled"] = settled;
+    // FPGA backlight status: 0x46/0x47 multiplier in use (0x800 = 100 % brightness), 0x48 APL.
+    int b_hi = -1, b_lo = -1, apl = -1;
+    if (readReg(0x46, b_hi) && readReg(0x47, b_lo) && readReg(0x48, apl)) {
+        const int b = (b_hi << 8) | b_lo;
+        j["fpga_multiplier"] = b;
+        j["fpga_multiplier_percent"] = b * 100.0 / 0x800;
+        j["fpga_apl_percent"] = apl * 100.0 / 255;
+    } else {
+        j["fpga_multiplier"] = nullptr;
+        j["fpga_apl_percent"] = nullptr;
+    }
+    return j;
 }
 
 }  // namespace als_dimmer

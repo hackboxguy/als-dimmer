@@ -164,7 +164,8 @@ void ThermalCompensation::configureI2cSource(const std::string& device,
 }
 
 void ThermalCompensation::startPolling(const std::string& temp_command,
-                                       int poll_interval_sec) {
+                                       int poll_interval_sec,
+                                       bool require_table) {
     if (polling_started_) {
         LOG_WARN("ThermalCompensation", "startPolling() called twice; ignoring");
         return;
@@ -174,7 +175,7 @@ void ThermalCompensation::startPolling(const std::string& temp_command,
                  "nor i2c_temp_source configured; thermal compensation will not be active");
         return;
     }
-    if (!table_loaded_) {
+    if (!table_loaded_ && require_table) {
         LOG_WARN("ThermalCompensation", "startPolling() called but no factor table is "
                  "loaded; thermal compensation will not be active");
         return;

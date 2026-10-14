@@ -18,6 +18,7 @@ struct PersistentState {
     int manual_brightness = 50;
     int last_auto_brightness = 50;
     int brightness_offset = 0;
+    bool ld_dynamic_enabled = true;    // dynamic local dimming switch (local_dimming_profiles)
     std::string last_updated;
 };
 
@@ -47,6 +48,8 @@ public:
 
     // Get/set last auto brightness
     int getLastAutoBrightness() const { return state_.last_auto_brightness; }
+    bool getLdDynamicEnabled() const { return state_.ld_dynamic_enabled; }
+    void setLdDynamicEnabled(bool enabled);
     void setLastAutoBrightness(int brightness);
 
     // Mark state as dirty (needs save)

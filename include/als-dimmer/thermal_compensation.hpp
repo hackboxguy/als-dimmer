@@ -84,7 +84,15 @@ public:
      * read errors out. If `temp_command` is empty AND no I2C source is
      * configured, polling does not start.
      */
-    void startPolling(const std::string& temp_command, int poll_interval_sec);
+    void startPolling(const std::string& temp_command, int poll_interval_sec,
+                      bool require_table = true);
+
+    /**
+     * True once the polling thread runs (with or without a factor table). The
+     * thermal limiter only needs readings, so it starts polling with
+     * require_table = false; factor() still returns 1.0 without a table.
+     */
+    bool isPolling() const { return polling_started_; }
 
     /**
      * Signal the polling thread to exit and join it. Idempotent. Called

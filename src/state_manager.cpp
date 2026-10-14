@@ -51,6 +51,10 @@ bool StateManager::load() {
             state_.brightness_offset = j["brightness_offset"].get<int>();
         }
 
+        if (j.contains("ld_dynamic_enabled")) {
+            state_.ld_dynamic_enabled = j["ld_dynamic_enabled"].get<bool>();
+        }
+
         if (j.contains("last_updated")) {
             state_.last_updated = j["last_updated"].get<std::string>();
         }
@@ -87,6 +91,7 @@ bool StateManager::save() {
     j["manual_brightness"] = state_.manual_brightness;
     j["last_auto_brightness"] = state_.last_auto_brightness;
     j["brightness_offset"] = state_.brightness_offset;
+    j["ld_dynamic_enabled"] = state_.ld_dynamic_enabled;
     j["last_updated"] = state_.last_updated;
 
     // Write atomically: a power cut while writing the file in place could leave it
@@ -133,6 +138,13 @@ void StateManager::setMode(OperatingMode mode) {
         state_.mode = mode;
         dirty_ = true;
         LOG_DEBUG("StateManager", "Mode changed to: " << modeToString(mode));
+    }
+}
+
+void StateManager::setLdDynamicEnabled(bool enabled) {
+    if (state_.ld_dynamic_enabled != enabled) {
+        state_.ld_dynamic_enabled = enabled;
+        dirty_ = true;
     }
 }
 

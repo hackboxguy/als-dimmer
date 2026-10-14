@@ -14,6 +14,7 @@
 #include "als-dimmer/thermal_compensation.hpp"
 #include "als-dimmer/wp_adjust_restore.hpp"
 #include "als-dimmer/ld_profile.hpp"
+#include "als-dimmer/thermal_limit.hpp"
 #include "json.hpp"
 #include <iostream>
 #include <fstream>
@@ -340,7 +341,9 @@ std::string processCommand(const std::string& command,
                           bool sensor_available,
                           const als_dimmer::BrightnessToNitsLut& b2n_lut,
                           const std::string& output_type,
-                          const als_dimmer::ThermalCompensation& thermal) {
+                          const als_dimmer::ThermalCompensation& thermal,
+                          als_dimmer::LdProfileController* ld_profile,
+                          const als_dimmer::ThermalLimiter& thermal_limit) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -657,6 +660,36 @@ std::string processCommand(const std::string& command,
                                           data);
                 }
 
+                case CommandType::GET_LD_STATUS: {
+                    json data;
+                    if (ld_profile) {
+                        data["ld"] = ld_profile->status();
+                    } else {
+                        data["ld"] = {{"available", false}};
+                    }
+                    data["thermal_limit"] = thermal_limit.status(thermal);
+                    return generateResponse(ResponseStatus::SUCCESS, "LD status", data);
+                }
+
+                case CommandType::SET_LD_DYNAMIC: {
+                    if (!parsed_cmd.params.contains("enabled") || !parsed_cmd.params["enabled"].is_boolean()) {
+                        return generateErrorResponse("set_ld_dynamic needs params.enabled (bool)",
+                                                     "INVALID_PARAMS");
+                    }
+                    if (!ld_profile || !ld_profile->available()) {
+                        return generateErrorResponse("local-dimming profiles not available on this display",
+                                                     "NOT_AVAILABLE");
+                    }
+                    const bool en = parsed_cmd.params["enabled"].get<bool>();
+                    ld_profile->setDynamicEnabled(en);
+                    state_mgr.setLdDynamicEnabled(en);
+                    state_mgr.save();
+                    json data;
+                    data["ld"] = ld_profile->status();
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                            en ? "Dynamic local dimming on" : "Dynamic local dimming off", data);
+                }
+
                 case CommandType::UNKNOWN:
                 default:
                     return generateErrorResponse("Unknown command type", "UNKNOWN_COMMAND");
@@ -806,6 +839,7 @@ int main(int argc, char* argv[]) {
     if (config.ld_profiles.enabled) {
         ld_profile = std::make_unique<als_dimmer::LdProfileController>(config.ld_profiles,
                                                                        config.output.device);
+        ld_profile->setDynamicEnabled(state_mgr.getLdDynamicEnabled());
     }
 
     // Load brightness->nits calibration table (optional). Daemon runs identically
@@ -871,6 +905,32 @@ int main(int argc, char* argv[]) {
         }
     } else {
         LOG_INFO("main", "thermal_compensation disabled or not configured");
+    }
+
+    // Thermal limiter: needs temperature readings only. If thermal compensation did not start the
+    // poller (no factor table / disabled), start it here from the same temperature source config.
+    als_dimmer::ThermalLimiter thermal_limiter(config.thermal_limit,
+                                               config.thermal_compensation.poll_interval_sec);
+    if (config.thermal_limit.enabled && !thermal.isPolling()) {
+        const auto& i2c = config.thermal_compensation.i2c_temp_source;
+        bool i2c_configured = false;
+        if (!i2c.device.empty()) {
+            try {
+                thermal.configureI2cSource(i2c.device,
+                    static_cast<uint8_t>(std::stoul(i2c.address, nullptr, 16)),
+                    static_cast<uint16_t>(std::stoul(i2c.register_addr, nullptr, 16)), i2c.scale);
+                i2c_configured = true;
+            } catch (const std::exception& e) {
+                LOG_WARN("main", "thermal_limit: i2c_temp_source parse failed: " << e.what());
+            }
+        }
+        if (i2c_configured || !config.thermal_compensation.temp_command.empty()) {
+            thermal.startPolling(config.thermal_compensation.temp_command,
+                                 config.thermal_compensation.poll_interval_sec, false);
+        } else {
+            LOG_WARN("main", "thermal_limit enabled but thermal_compensation has no i2c_temp_source "
+                     "or temp_command: no temperature, no limiting");
+        }
     }
 
     // Initialize control interface (TCP and/or Unix sockets)
@@ -945,7 +1005,7 @@ int main(int argc, char* argv[]) {
                                                   manual_override_occurred, manual_override_type,
                                                   notifier, sensor_available,
                                                   b2n_lut, output->getType(),
-                                                  thermal);
+                                                  thermal, ld_profile.get(), thermal_limiter);
             control.sendResponseTo(queued.client_fd, response);
             if (queued.close_after_response && queued.client_fd >= 0) {
                 close(queued.client_fd);
@@ -1009,9 +1069,11 @@ int main(int argc, char* argv[]) {
             last_sensor_healthy_time = std::chrono::steady_clock::now();
         }
 
-        // Local-dimming profile follows the ambient zone in every brightness mode
-        // ("" = no lux this iteration: keep the current profile).
+        // Thermal limiter (slow; acts once per poll interval), then the LD profile, which follows
+        // the ambient zone in every brightness mode ("" = no lux this iteration: keep the zone).
+        thermal_limiter.update(thermal);
         if (ld_profile) {
+            ld_profile->setBoostSuppressed(thermal_limiter.boostSuppressed());
             ld_profile->update((current_lux >= 0 && zone_mapper)
                                    ? zone_mapper->getCurrentZoneName(current_lux) : std::string());
         }
@@ -1035,6 +1097,10 @@ int main(int argc, char* argv[]) {
                     current_zone_name = "simple";
                     curve_type = "linear";
                 }
+
+                // Thermal limiter: scale the target (not the output) so the smooth transition below
+                // walks to the limited level instead of fighting it.
+                target_brightness = thermal_limiter.apply(target_brightness);
 
                 // Calculate smooth brightness transition with diagnostics
                 int current_brightness = output->getCurrentBrightness();
@@ -1114,7 +1180,7 @@ int main(int argc, char* argv[]) {
             // MANUAL or MANUAL_TEMPORARY: use manual brightness
             int manual_brightness = state_mgr.getManualBrightness();
             int current_brightness_before = output->getCurrentBrightness();
-            output->setBrightness(manual_brightness);
+            output->setBrightness(thermal_limiter.apply(manual_brightness));
             notifier.emitBrightnessChanged(manual_brightness);
 
             std::string mode_str = als_dimmer::StateManager::modeToString(state_mgr.getMode());

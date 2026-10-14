@@ -498,6 +498,33 @@ Config Config::loadFromFile(const std::string& filename) {
                 ld.profiles[it.key()] = prof;
             }
         }
+        if (ld_json.contains("static_profile")) {
+            LdProfile prof;
+            for (auto f = ld_json["static_profile"].begin(); f != ld_json["static_profile"].end(); ++f) {
+                if (f.key().rfind("_", 0) == 0) continue;
+                int idx = -1;
+                for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+                    if (f.key() == keys[k]) idx = k;
+                }
+                if (idx < 0) {
+                    throw ConfigError("local_dimming_profiles.static_profile: unknown field '" + f.key() + "'");
+                }
+                prof.value[idx] = parse_int_auto(f.value());
+            }
+            ld.static_profile = prof;
+        }
+    }
+
+    // Parse thermal_limit (optional)
+    if (j.contains("thermal_limit")) {
+        auto& tl_json = j["thermal_limit"];
+        auto& tl = config.thermal_limit;
+        if (tl_json.contains("enabled")) tl.enabled = tl_json["enabled"].get<bool>();
+        if (tl_json.contains("start_c")) tl.start_c = tl_json["start_c"].get<double>();
+        if (tl_json.contains("hysteresis_c")) tl.hysteresis_c = tl_json["hysteresis_c"].get<double>();
+        if (tl_json.contains("step_percent")) tl.step_percent = tl_json["step_percent"].get<int>();
+        if (tl_json.contains("min_percent")) tl.min_percent = tl_json["min_percent"].get<int>();
+        if (tl_json.contains("suppress_boost")) tl.suppress_boost = tl_json["suppress_boost"].get<bool>();
     }
 
     // Parse calibration configuration (optional)
@@ -719,6 +746,18 @@ void Config::validate() const {
         if (ld_profiles.profiles.empty()) {
             throw ConfigError("local_dimming_profiles.enabled but no profiles");
         }
+        auto check_profile = [](const std::string& name, const LdProfile& p) {
+            for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
+                if (p.value[k] < -1 || p.value[k] > 255) {
+                    throw ConfigError("local_dimming_profiles." + name + ": register values must be 0..255");
+                }
+            }
+            // 0x33 bit 7 = gamma enable (perceptual LUT, raises the black level): not a profile value.
+            if (p.value[PC_TUNE] > 127) {
+                throw ConfigError("local_dimming_profiles." + name +
+                                  ": pc_tune must be 0..127 (gain/64; bit 7 would enable the gamma LUT)");
+            }
+        };
         for (const auto& p : ld_profiles.profiles) {
             bool known = false;
             for (const auto& z : zones) known = known || (z.name == p.first);
@@ -726,12 +765,16 @@ void Config::validate() const {
                 throw ConfigError("local_dimming_profiles.profiles." + p.first +
                                   ": no zone with that name");
             }
-            for (int k = 0; k < LD_REGISTER_COUNT; ++k) {
-                if (p.second.value[k] < -1 || p.second.value[k] > 255) {
-                    throw ConfigError("local_dimming_profiles.profiles." + p.first +
-                                      ": register values must be 0..255");
-                }
-            }
+            check_profile("profiles." + p.first, p.second);
+        }
+        check_profile("static_profile", ld_profiles.static_profile);
+    }
+
+    if (thermal_limit.enabled) {
+        if (thermal_limit.hysteresis_c < 0 || thermal_limit.step_percent < 1 ||
+            thermal_limit.step_percent > 50 || thermal_limit.min_percent < 10 ||
+            thermal_limit.min_percent > 100) {
+            throw ConfigError("thermal_limit: hysteresis_c >= 0, step_percent 1..50, min_percent 10..100");
         }
     }
 

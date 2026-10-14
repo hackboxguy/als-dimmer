@@ -65,16 +65,34 @@
   ],
 
   "local_dimming_profiles": {
-    "_comment": "Day/night local dimming (pixelpipe-fpga docs/dynamic-local-dimming.md step 3; FPGA v0x56+). The detected zone selects raw FPGA 0x1E page-0 registers: ld_alpha 0x31 (LD max/avg blend, 16 = baked default; higher = small content brighter, more halo), pc_tune 0x33 (pixel-compensation gain/64, 64 = 1.0x), bl_boost 0x49 (low-APL boost on the LED gain, 64 = off, 90 = up to 2x GD), led_gain 0x43, bl_rise 0x4A. A zone must hold min_dwell_sec before its profile is used; registers then ramp by transition_steps per 500 ms iteration. Night: low halo. Outdoor: maximum readability.",
+    "_comment": "Day/night local dimming (pixelpipe-fpga docs/dynamic-local-dimming.md step 3; FPGA v0x56+). The detected zone selects raw FPGA 0x1E page-0 registers: ld_alpha 0x31 (LD max/avg blend, 16 = baked default; higher = small content brighter, more halo), pc_tune 0x33 (pixel-compensation gain/64, 64 = 1.0x), bl_boost 0x49 (low-APL boost on the LED gain, 64 = off, 90 = up to 2x GD), led_gain 0x43, bl_rise 0x4A. A zone must hold min_dwell_sec before its profile is used; registers then ramp by transition_steps per 500 ms iteration (bl_boost 0 = at once: FPGA v0x57 glides a lowered boost itself). static_profile is used when the user switches dynamic LD off (set_ld_dynamic). Night: no extra brightness for dark content. Outdoor: maximum readability.",
     "enabled": true,
     "min_dwell_sec": 5,
     "verify_interval_sec": 10,
-    "transition_steps": {"ld_alpha": 8, "pc_tune": 2, "bl_boost": 2},
+    "transition_steps": {"ld_alpha": 8, "pc_tune": 2, "bl_boost": 0},
+    "static_profile": {"ld_alpha": 16, "bl_boost": 64, "pc_tune": 64},
     "profiles": {
       "night":   {"ld_alpha": 16,  "bl_boost": 64, "pc_tune": 64},
       "indoor":  {"ld_alpha": 48,  "bl_boost": 77, "pc_tune": 64},
       "outdoor": {"ld_alpha": 128, "bl_boost": 90, "pc_tune": 83}
     }
+  },
+
+  "thermal_compensation": {
+    "_comment": "Only the temperature source is used here (no factor table): the thermal_limit below reads the backlight temperature from the display IOC (0x66, register 0x1002, int16 x 0.1 C).",
+    "enabled": false,
+    "poll_interval_sec": 10,
+    "i2c_temp_source": {"device": "/dev/i2c-1", "address": "0x66", "register": "0x1002", "scale": 0.1}
+  },
+
+  "thermal_limit": {
+    "_comment": "Keeps the backlight at or below start_c: at each 10 s reading at/above start_c the LD boost goes off and the brightness limit drops by step_percent (floor min_percent); at/below start_c - hysteresis_c it recovers by step_percent. No reading = no limiting.",
+    "enabled": true,
+    "start_c": 60.0,
+    "hysteresis_c": 3.0,
+    "step_percent": 2,
+    "min_percent": 50,
+    "suppress_boost": true
   },
 
   "notification": {

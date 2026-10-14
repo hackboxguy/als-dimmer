@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 
 using json = nlohmann::json;
@@ -54,6 +55,7 @@ public:
 
     bool open_bus(const std::string& device, int address, int page) {
         page_ = page;
+        address_ = address;
         fd_ = open(device.c_str(), O_RDWR);
         if (fd_ < 0) {
             LOG_WARN("wp_adjust", "Cannot open " << device << ": "
@@ -71,18 +73,29 @@ public:
         return true;
     }
 
+    // One I2C_RDWR transaction (pointer write + repeated-start read). A separate write() then
+    // read() lets another process on the bus move the slave's {page, reg} pointer in between:
+    // seen on the 14.6" bench (2026-10-14), the version read returned page-0 0x00 (release ID
+    // 0x1014) while disp-settings polled the FPGA, and the calibration was not applied.
     bool read16(int logical_reg, uint16_t& value) {
         uint8_t pointer[2] = {
             static_cast<uint8_t>(page_),
             static_cast<uint8_t>((logical_reg << 1) & 0xFF)
         };
-        if (write(fd_, pointer, sizeof(pointer)) !=
-                static_cast<ssize_t>(sizeof(pointer))) {
-            return false;
-        }
         uint8_t data[2] = {0, 0};
-        if (read(fd_, data, sizeof(data)) !=
-                static_cast<ssize_t>(sizeof(data))) {
+        struct i2c_msg msgs[2];
+        msgs[0].addr = static_cast<__u16>(address_);
+        msgs[0].flags = 0;
+        msgs[0].len = sizeof(pointer);
+        msgs[0].buf = pointer;
+        msgs[1].addr = static_cast<__u16>(address_);
+        msgs[1].flags = I2C_M_RD;
+        msgs[1].len = sizeof(data);
+        msgs[1].buf = data;
+        struct i2c_rdwr_ioctl_data xfer;
+        xfer.msgs = msgs;
+        xfer.nmsgs = 2;
+        if (ioctl(fd_, I2C_RDWR, &xfer) < 0) {
             return false;
         }
         value = static_cast<uint16_t>((data[0] << 8) | data[1]);
@@ -103,6 +116,7 @@ public:
 private:
     int fd_;
     int page_;
+    int address_ = 0;
 };
 
 struct WpAdjustProfile {
