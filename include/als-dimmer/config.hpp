@@ -215,6 +215,11 @@ struct LdProfileConfig {
     std::map<std::string, LdProfile> profiles;   // zone name -> registers
     // Used when the user switches dynamic LD off (set_ld_dynamic): the FPGA's neutral values.
     LdProfile static_profile = {{16, 64, -1, 64, -1}};
+    // The nits table is swept at one LED gain (nits_gain_ref, 0x43 = 128 = 1.0x). A profile with another
+    // led_gain makes full white brighter by about (led_gain / ref)^exponent (12.3" NQ5: ~0.96, pixelpipe
+    // docs §21); the nits API applies that factor to the gain actually in the FPGA. 0 = off (no change).
+    double nits_gain_exponent = 0.0;
+    int nits_gain_ref = 128;
 };
 
 // Thermal limiter (optional): regulates the brightness so that the backlight temperature settles at

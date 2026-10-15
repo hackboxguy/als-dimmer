@@ -53,6 +53,10 @@ public:
     void setBoostSuppressed(bool suppressed);
     bool boostSuppressed() const { return boost_suppressed_; }
 
+    // Factor on the nits table for the LED gain in use: (led_gain / nits_gain_ref)^nits_gain_exponent
+    // (1.0 when the exponent is 0, the gain is not managed, or the feature is unavailable).
+    double nitsFactor() const;
+
     // "night" / "indoor" / ... or "static" when dynamic LD is off; "" before the first zone.
     std::string activeProfile() const;
 

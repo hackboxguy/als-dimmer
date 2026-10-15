@@ -2,6 +2,7 @@
 #include "als-dimmer/logger.hpp"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -265,6 +266,13 @@ void LdProfileController::update(const std::string& zone_name) {
     }
 }
 
+double LdProfileController::nitsFactor() const {
+    if (disabled_ || cfg_.nits_gain_exponent == 0.0) return 1.0;
+    int g = current_[LED_GAIN] > 0 ? current_[LED_GAIN] : target_[LED_GAIN];
+    if (g <= 0) return 1.0;
+    return std::pow(static_cast<double>(g) / cfg_.nits_gain_ref, cfg_.nits_gain_exponent);
+}
+
 nlohmann::json LdProfileController::status() {
     nlohmann::json j;
     j["available"] = !disabled_;
@@ -272,6 +280,7 @@ nlohmann::json LdProfileController::status() {
     j["profile"] = activeProfile();
     j["zone"] = zone_;
     j["boost_suppressed"] = boost_suppressed_;
+    j["nits_factor"] = nitsFactor();
     if (disabled_) return j;
     nlohmann::json tgt = nlohmann::json::object(), cur = nlohmann::json::object();
     bool settled = true;

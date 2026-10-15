@@ -392,6 +392,8 @@ std::string processCommand(const std::string& command,
                         // is off, this multiplication is a no-op and behavior
                         // is bit-identical to before the feature was added.
                         nits *= thermal.factor();
+                        // LED gain of the active LD profile (the table is swept at nits_gain_ref)
+                        if (ld_profile) nits *= ld_profile->nitsFactor();
                     }
 
                     bool thermal_has_reading = thermal.hasReading();
@@ -603,7 +605,7 @@ std::string processCommand(const std::string& command,
                         // Apply thermal correction. factor() is 1.0 when
                         // thermal compensation is disabled, so this is a
                         // no-op for unaffected configs.
-                        data["nits"] = nits * thermal.factor();
+                        data["nits"] = nits * thermal.factor() * (ld_profile ? ld_profile->nitsFactor() : 1.0);
                     } else {
                         data["nits"] = nullptr;
                     }
@@ -631,7 +633,7 @@ std::string processCommand(const std::string& command,
                     // user-requested nits AT THE CURRENT TEMPERATURE. When
                     // thermal compensation is disabled, factor() == 1.0 and
                     // this is a no-op vs prior behavior.
-                    double tc_factor = thermal.factor();
+                    double tc_factor = thermal.factor() * (ld_profile ? ld_profile->nitsFactor() : 1.0);
                     double scaled_target = (tc_factor > 0.0)
                                             ? target_nits / tc_factor
                                             : target_nits;

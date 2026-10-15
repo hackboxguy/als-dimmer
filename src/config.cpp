@@ -461,6 +461,10 @@ Config Config::loadFromFile(const std::string& filename) {
         if (ld_json.contains("i2c_address")) ld.i2c_address = parse_int_auto(ld_json["i2c_address"]);
         if (ld_json.contains("min_dwell_sec")) ld.min_dwell_sec = ld_json["min_dwell_sec"].get<int>();
         if (ld_json.contains("verify_interval_sec")) ld.verify_interval_sec = ld_json["verify_interval_sec"].get<int>();
+        if (ld_json.contains("nits_gain_exponent")) ld.nits_gain_exponent = ld_json["nits_gain_exponent"].get<double>();
+        if (ld_json.contains("nits_gain_ref")) ld.nits_gain_ref = parse_int_auto(ld_json["nits_gain_ref"]);
+        if (ld.nits_gain_exponent < 0.0 || ld.nits_gain_exponent > 2.0 || ld.nits_gain_ref <= 0)
+            throw std::runtime_error("local_dimming_profiles: nits_gain_exponent must be 0..2 and nits_gain_ref > 0");
         static const char* const keys[LD_REGISTER_COUNT] = {
             "ld_alpha", "pc_tune", "led_gain", "bl_boost", "bl_rise"};
         if (ld_json.contains("transition_steps")) {
