@@ -64,6 +64,114 @@
     }
   ],
 
+  "local_dimming_profiles": {
+
+    "_comment": "Day/night local dimming (pixelpipe-fpga docs/dynamic-local-dimming.md §18; 14.6-inch EJ scan from FPGA v0x6E). The detected zone selects raw FPGA 0x1E page-0 registers: ld_alpha 0x31 (LD max/avg blend, 16 = baked default; higher = small content brighter, more halo), pc_tune 0x33 (pixel-compensation gain/64, 64 = 1.0x; this panel runs the vendor PC tables, 0x4C = 0, so 83 scales their shadow lift by 1.3), bl_boost 0x49 (low-APL boost, 64 = off), led_gain 0x43, bl_rise 0x4A. Same profile values as the 12.3-inch NQ5: bl_boost stays 64 in every zone (no panel rating yet; the power-up cap 0x7F80 = LD-off white never binds on LD-on content, so a boost would raise full white too, cf. review v4 N17). A zone must hold min_dwell_sec before its profile is used; static_profile applies when the user switches dynamic LD off.",
+
+    "enabled": true,
+
+    "min_dwell_sec": 5,
+
+    "verify_interval_sec": 10,
+
+    "transition_steps": {
+
+      "ld_alpha": 0,
+
+      "pc_tune": 2,
+
+      "bl_boost": 0
+
+    },
+
+    "static_profile": {
+
+      "ld_alpha": 16,
+
+      "bl_boost": 64,
+
+      "pc_tune": 64
+
+    },
+
+    "profiles": {
+
+      "night": {
+
+        "ld_alpha": 16,
+
+        "bl_boost": 64,
+
+        "pc_tune": 64
+
+      },
+
+      "indoor": {
+
+        "ld_alpha": 48,
+
+        "bl_boost": 64,
+
+        "pc_tune": 64
+
+      },
+
+      "outdoor": {
+
+        "ld_alpha": 128,
+
+        "bl_boost": 64,
+
+        "pc_tune": 83
+
+      }
+
+    }
+
+  },
+
+  "thermal_compensation": {
+
+    "_comment": "Only the temperature source is used here (no factor table): the thermal_limit below reads the backlight temperature from the display IOC (0x66, register 0x1002, int16 x 0.1 C).",
+
+    "enabled": false,
+
+    "poll_interval_sec": 10,
+
+    "i2c_temp_source": {
+
+      "device": "/dev/i2c-1",
+
+      "address": "0x66",
+
+      "register": "0x1002",
+
+      "scale": 0.1
+
+    }
+
+  },
+
+  "thermal_limit": {
+
+    "_comment": "Keeps the backlight at about start_c (proportional): limit = 100 - gain_percent_per_c x (T - start_c), floor min_percent, at most step_percent per 10 s reading; LD boost off while T >= start_c. No reading = no limiting. Temperature from the display IOC (0x66, register 0x1002). 14.6-inch EJ scan: 39 C idle on the bench (2026-10-15); start_c 60 as on the other panels pending the panel's derating spec and a soak measurement.",
+
+    "enabled": true,
+
+    "start_c": 60.0,
+
+    "gain_percent_per_c": 8.0,
+
+    "hysteresis_c": 1.0,
+
+    "step_percent": 1,
+
+    "min_percent": 50,
+
+    "suppress_boost": true
+
+  },
+
   "notification": {
     "enabled": true,
     "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
