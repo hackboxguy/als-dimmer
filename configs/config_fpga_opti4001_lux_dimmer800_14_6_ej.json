@@ -84,13 +84,23 @@
 
     },
 
+    "_comment_led_gain": "LED gain 0x43 per zone, Fable prompt v12 (2026-10-17): the 12.3-inch recipe, 160 / 160 / 180 / 205 (static / night / indoor / outdoor; was the seed 128 everywhere). At 128 white is backlight-limited (~0.65 of LD off on a ramp) below the compensated 222 bar, so the top of a grey ramp inverted; greys are unchanged (the FPGA divides the gain out of the lift, B_ref/B). Measured on v0x88 (i1, full white): the LED words saturate in the driver (DRIVE_GAIN 170/128 after B) from gain ~170 at GD 100 % (white 1049 / 1228 / 1272 / 1272 cd/m2 at 128 / 160 / 180 / 205), so the day gains add white only below ~85 % GD; the cap 0x7F80 does not bind (B readback follows the gain).",
+
+    "_comment_nits_gain": "The nits table (calibrations/dimmer800_14_6_ej.csv) was swept at led_gain 128. Full white at gain g reads (g/128)^e brighter: measured 2026-10-17 (FPGA v0x88) at GD 50 / 25 %: 160 -> e 0.94 / 0.99, 180 -> 0.92 / 0.93, 205 -> 0.92 / 0.93 (the 12.3-inch value 0.92). At GD 100 % the driver clips from gain ~170 (see _comment_led_gain): the API over-states white there by up to 27 % at gain 205.",
+
+    "nits_gain_exponent": 0.92,
+
+    "nits_gain_ref": 128,
+
     "static_profile": {
 
       "ld_alpha": 16,
 
       "bl_boost": 64,
 
-      "pc_tune": 64
+      "pc_tune": 64,
+
+      "led_gain": 160
 
     },
 
@@ -102,7 +112,9 @@
 
         "bl_boost": 64,
 
-        "pc_tune": 64
+        "pc_tune": 64,
+
+        "led_gain": 160
 
       },
 
@@ -112,7 +124,9 @@
 
         "bl_boost": 64,
 
-        "pc_tune": 64
+        "pc_tune": 64,
+
+        "led_gain": 180
 
       },
 
@@ -122,7 +136,9 @@
 
         "bl_boost": 64,
 
-        "pc_tune": 83
+        "pc_tune": 83,
+
+        "led_gain": 205
 
       }
 
