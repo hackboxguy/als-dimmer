@@ -65,6 +65,32 @@
     }
   ],
 
+  "local_dimming_profiles": {
+
+    "_comment": "Day/night local dimming on the 15.6-inch 2.5K 0OD (Lattice ECP5UM-45, pixelpipe-fpga v0xA2+). Added 2026-10-18 so disp-settings shows the 'Dynamic dimming' tile; this rig has no ALS fitted yet (0x0C reads FFFFFFFF), so until ALS support is added the zone stays unknown and the switch selects between the static profile and the last zone's. Registers on the 0x1E slave page 0: ld_alpha 0x31 (LD max/avg blend; 0 = the 15.6 seed, low halo at night), pc_tune 0x33 (PC gain/64, 64 = calibrated; 83 = +30 % daylight readability), bl_boost 0x49 (64 = off), led_gain 0x43. led_gain stays at the board seed 181 in every zone: the 15.6 full-field cap 0x5CC0 binds above it, and more LED power is what wedges this rig's FPD-Link (LD off at GD 100 %, pixelpipe docs/dynamic-local-dimming.md 24-26). The headroom knee 0x4E (0xCC) is the FPGA seed and not managed here.",
+
+    "enabled": true,
+
+    "min_dwell_sec": 5,
+
+    "verify_interval_sec": 10,
+
+    "transition_steps": { "ld_alpha": 0, "pc_tune": 2, "bl_boost": 0 },
+
+    "static_profile": { "ld_alpha": 0, "bl_boost": 64, "pc_tune": 64, "led_gain": 181 },
+
+    "profiles": {
+
+      "night":   { "ld_alpha": 0,  "bl_boost": 64, "pc_tune": 64, "led_gain": 181 },
+
+      "indoor":  { "ld_alpha": 32, "bl_boost": 64, "pc_tune": 64, "led_gain": 181 },
+
+      "outdoor": { "ld_alpha": 64, "bl_boost": 64, "pc_tune": 83, "led_gain": 181 }
+
+    }
+
+  },
+
   "notification": {
     "enabled": true,
     "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
