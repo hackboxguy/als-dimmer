@@ -799,6 +799,12 @@ int main(int argc, char* argv[]) {
     // a NullSensor and force MANUAL mode so the daemon stays usable as a
     // slider-controlled brightness service.
     bool sensor_available = false;
+    // A failed init is retried from the control loop (sensor_retry_*): after a cold power-up the
+    // FPGA-hosted ALS (fpga_opti4001*) can answer only after the daemon has started. The mode the
+    // user had saved is restored when the sensor comes back (restore_mode, see the loop).
+    als_dimmer::OperatingMode restore_mode = state_mgr.getMode();   // the mode to return to when the sensor is back
+    bool sensor_retry = false;
+    int fallback_manual_brightness = -1;
     auto sensor = createSensor(config);
     if (sensor && sensor->init()) {
         sensor_available = true;
@@ -807,7 +813,8 @@ int main(int argc, char* argv[]) {
         if (config.sensor.type == "null") {
             LOG_INFO("main", "sensor.type=null; running in MANUAL-only mode (external control via socket)");
         } else {
-            LOG_WARN("main", "Sensor init failed; running in MANUAL-only mode (slider control)");
+            LOG_WARN("main", "Sensor init failed; running in MANUAL-only mode (slider control), retrying the sensor");
+            sensor_retry = true;
         }
         sensor = std::make_unique<als_dimmer::NullSensor>();
         sensor->init();  // no-op, but keeps interface contract clean
@@ -816,6 +823,7 @@ int main(int argc, char* argv[]) {
         if (state_mgr.getManualBrightness() <= 0) {
             state_mgr.setManualBrightness(config.control.fallback_brightness);
         }
+        fallback_manual_brightness = state_mgr.getManualBrightness();
     }
 
     // Create output
@@ -991,6 +999,10 @@ int main(int argc, char* argv[]) {
     auto loop_start = std::chrono::steady_clock::now();
     auto manual_temp_start = std::chrono::steady_clock::now();
     auto last_sensor_healthy_time = std::chrono::steady_clock::now();
+    // Retry schedule for a failed sensor init / LD-profile probe: every 5 s for the first 2 minutes,
+    // then every 60 s (a rig without the sensor fitted only costs one I2C read a minute).
+    auto next_retry = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    int retry_count = 0;
     float current_lux = 0.0f;
     bool should_exit = false;
 
@@ -1040,6 +1052,39 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Retry what failed at startup (cold power-up: the FPGA can answer I2C only after the daemon
+        // has started) or what the sensor watchdog demoted.
+        if ((sensor_retry || (ld_profile && ld_profile->probeFailed())) &&
+            std::chrono::steady_clock::now() >= next_retry) {
+            ++retry_count;
+            next_retry = std::chrono::steady_clock::now() + std::chrono::seconds(retry_count < 24 ? 5 : 60);
+            if (ld_profile && ld_profile->probeFailed()) {
+                ld_profile->retryProbe();
+            }
+            if (sensor_retry) {
+                auto fresh = createSensor(config);
+                // init() plus one healthy reading (a sensor whose init cannot fail, e.g. "file", would
+                // otherwise flap between recovered and demoted)
+                if (fresh && fresh->init() && (fresh->readLux(), fresh->isHealthy())) {
+                    sensor = std::move(fresh);
+                    sensor_available = true;
+                    sensor_retry = false;
+                    last_sensor_healthy_time = std::chrono::steady_clock::now();
+                    LOG_INFO("main", "Sensor initialized on retry " << retry_count << ": " << sensor->getType());
+                    // Back to the saved AUTO mode, unless the user has taken the slider since the fallback.
+                    if (restore_mode != als_dimmer::OperatingMode::MANUAL &&
+                        state_mgr.getMode() == als_dimmer::OperatingMode::MANUAL &&
+                        state_mgr.getManualBrightness() == fallback_manual_brightness) {
+                        state_mgr.setMode(als_dimmer::OperatingMode::AUTO);
+                        state_mgr.save();
+                        notifier.emitModeChanged("auto");
+                        LOG_INFO("main", "Restored AUTO mode (the mode in use before the sensor was unavailable)");
+                    }
+                }
+            }
+            if (!sensor_retry && !(ld_profile && ld_profile->probeFailed())) retry_count = 0;
+        }
+
         // Read sensor: skip when sensor isn't available, or in MANUAL modes
         // when minimal_i2c is enabled. Otherwise read and feed the watchdog.
         if (sensor_available &&
@@ -1060,7 +1105,9 @@ int main(int argc, char* argv[]) {
                     sensor = std::make_unique<als_dimmer::NullSensor>();
                     sensor->init();
                     sensor_available = false;
+                    sensor_retry = true;
                     current_lux = -1.0f;
+                    restore_mode = state_mgr.getMode();
                     if (state_mgr.getMode() != als_dimmer::OperatingMode::MANUAL) {
                         if (state_mgr.getManualBrightness() <= 0) {
                             state_mgr.setManualBrightness(config.control.fallback_brightness);
@@ -1068,6 +1115,7 @@ int main(int argc, char* argv[]) {
                         state_mgr.setMode(als_dimmer::OperatingMode::MANUAL);
                         notifier.emitModeChanged("manual");
                     }
+                    fallback_manual_brightness = state_mgr.getManualBrightness();
                     state_mgr.save();
                 }
             }

@@ -48,14 +48,33 @@ LdProfileController::LdProfileController(const LdProfileConfig& cfg,
         disabled_ = true;
         return;
     }
-    // Probe: the release-ID register (0x00) must answer on the new slave.
+    // Probe: the release-ID register (0x00) must answer on the new slave. If it does not (the FPGA
+    // can still be configuring after a cold power-up), main() keeps calling retryProbe().
     int v = 0;
     if (!readReg(0x00, v)) {
         LOG_WARN("ld_profile", "FPGA new slave 0x" << std::hex << cfg_.i2c_address << std::dec
-                 << " does not answer on " << device_ << "; local-dimming profiles disabled");
+                 << " does not answer on " << device_ << "; local-dimming profiles disabled until it does");
         disabled_ = true;
+        probe_failed_ = true;
         return;
     }
+    logEnabled();
+}
+
+bool LdProfileController::retryProbe() {
+    if (!probe_failed_) return !disabled_;
+    int v = 0;
+    if (!readReg(0x00, v)) return false;
+    probe_failed_ = false;
+    disabled_ = false;
+    LOG_INFO("ld_profile", "FPGA new slave 0x" << std::hex << cfg_.i2c_address << std::dec
+             << " answers now on " << device_);
+    logEnabled();
+    computeTarget();
+    return true;
+}
+
+void LdProfileController::logEnabled() {
     LOG_INFO("ld_profile", "Local-dimming profiles enabled (" << cfg_.profiles.size()
              << " profiles, dwell " << cfg_.min_dwell_sec << " s, verify every "
              << cfg_.verify_interval_sec << " s, steps " << describe(cfg_.transition_step) << ")");

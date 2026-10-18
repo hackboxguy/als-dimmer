@@ -44,6 +44,12 @@ public:
 
     bool available() const { return !disabled_; }
 
+    // The 0x1E slave did not answer the startup probe (e.g. the FPGA was still configuring after
+    // a cold power-up): the controller is disabled until retryProbe() finds it.
+    bool probeFailed() const { return probe_failed_; }
+    // Re-probe the slave; on success the controller enables itself (logs as at startup).
+    bool retryProbe();
+
     // Call once per control-loop iteration with the zone the ALS loop detected
     // ("" when the sensor is unavailable: the current zone is kept).
     void update(const std::string& zone_name);
@@ -65,6 +71,7 @@ public:
     nlohmann::json status();
 
 private:
+    void logEnabled();
     bool openBus();
     bool writeReg(int reg, int value);
     bool readReg(int reg, int& value);
@@ -77,6 +84,7 @@ private:
     std::string device_;
     int fd_ = -1;
     bool disabled_ = false;
+    bool probe_failed_ = false;                  // disabled only because the slave did not answer
     bool dynamic_enabled_ = true;
     bool boost_suppressed_ = false;
     std::string zone_;                           // zone whose profile is the target ("" = none yet)
