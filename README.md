@@ -304,6 +304,7 @@ See `configs/` directory for sample configurations:
 - `config_fpga_opti4001_dimmer2048.json` - Legacy FPGA-bridged OPTI4001 raw/scaled reader + FPGA dimmer (16-bit native)
 - `config_fpga_opti4001_lux_dimmer2048.json` - Fixed-RTL FPGA OPTI4001 integer-lux reader + FPGA dimmer (16-bit native)
 - `config_ioc_opt5001_tcon_ots17.json` - OTS-OLED 17.3" panel: OPT5001 read through the ioc-deserializer MCU + panel TCON brightness through the same MCU
+- `config_ioc_opt5001_tcon_oledib17.json` - 17" OLED-IB panel: the same MCU path (display_manager v01.15+ finds its TCON at 0x62, range 11..2047); no OPT5001 fitted yet, so MANUAL only
 - `config_can_als_file.json` - CAN ALS sensor + file output (for testing)
 - `config_simulation.json` - File-based simulation for testing
 

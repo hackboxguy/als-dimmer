@@ -1,0 +1,77 @@
+{
+  "_comment_display": "17-inch OLED-IB panel behind a DS90UH983/DS90UH988 link (one-to-one dual FPD-Link) and the ioc-deserializer MCU at 0x66, which runs the same REMOTE_DISP_OTS display_manager as the OTS-OLED. Both the sensor and the output talk to that one MCU. The OLED-IB TCON is a different part from the OTS-OLED's: 7-bit 0x62, brightness register 0x0837. display_manager v01.15 (sp6bins release 1.12) or later finds it at run time and reports its range in BRIGHT_MIN/BRIGHT_MAX; older firmware only knows the OTS TCON and NAKs every request here.",
+
+  "_comment_sensor": "No OPT5001 is fitted on the first OLED-IB board (2026-10-21), so the daemon runs MANUAL-only and keeps retrying the sensor. lux_range values are RAW ADC CODES, as for the OTS-OLED, whose zone edges are kept below as a starting point until a sensor is fitted and measured.",
+
+  "_comment_zones": "Zone edges copied from the OTS-OLED config (measured there 2026-09-10). Re-measure them on an OLED-IB with its sensor fitted before relying on AUTO mode; MANUAL brightness does not use them.",
+
+  "_comment_calibration": "brightness_to_nits.sweep_table is a REFERENCE table swept on OLED-IB unit 1 (CS2.0 983HH rig) with an i1 Display Pro, full white; per-unit variation is normal. Re-run tools/als-dimmer-sweep.py on your panel and replace calibrations/oled_ib17.csv for accurate nits.",
+  "_comment_output": "value_range is the OLED-IB TCON's own scale for register 0x0837: 11 (0x000B, 5 nits) to 2047 (0x07FF, 900 nits per the panel vendor), linear; measured full white 818.6 cd/m2 at 2047, 408.5 at 1029. The daemon sends percent; the ioc_tcon output maps it onto that range and checks it against BRIGHT_MIN/MAX read back from the IOC at start-up.",
+
+  "sensor": {
+    "type": "ioc_opt5001",
+    "device": "/dev/i2c-1",
+    "address": "0x66",
+    "scale_factor": 1.0
+  },
+  "output": {
+    "type": "ioc_tcon",
+    "device": "/dev/i2c-1",
+    "address": "0x66",
+    "value_range": [11, 2047]
+  },
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/tmp/als-dimmer-state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": false
+  },
+  "zones": [
+    {
+      "name": "night",
+      "lux_range": [0, 4500],
+      "brightness_range": [5, 30],
+      "curve": "logarithmic",
+      "step_sizes": { "large_up": 3, "large_down": 2, "medium_up": 2, "medium_down": 1, "small_up": 1, "small_down": 1 },
+      "error_thresholds": { "large": 30, "small": 12 }
+    },
+    {
+      "name": "indoor",
+      "lux_range": [4500, 9500],
+      "brightness_range": [30, 70],
+      "curve": "linear",
+      "step_sizes": { "large_up": 4, "large_down": 2, "medium_up": 2, "medium_down": 1, "small_up": 1, "small_down": 1 },
+      "error_thresholds": { "large": 35, "small": 15 }
+    },
+    {
+      "name": "outdoor",
+      "lux_range": [9500, 100000],
+      "brightness_range": [70, 100],
+      "curve": "logarithmic",
+      "step_sizes": { "large_up": 5, "large_down": 3, "medium_up": 2, "medium_down": 1, "small_up": 1, "small_down": 1 },
+      "error_thresholds": { "large": 40, "small": 20 }
+    }
+  ],
+  "calibration": {
+    "enabled": false
+  },
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/oled_ib17.csv"
+  }
+}
