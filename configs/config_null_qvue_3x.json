@@ -1,0 +1,63 @@
+{
+  "_comment_display": "3x QVue projection display behind a DS90UH983/DS90UH988 link (hh983-serializer config_mode=2). Its RH850 F1KM 'Qvue_IOC' at 0x32 dims each of the three displays; the daemon drives all three with one level. The output is write-only: any read from 0x32, or an i2cdetect probe, hangs the MCU and the 988 until a power cycle.",
+
+  "_comment_sensor": "The QVue has no ambient light sensor, so sensor.type=null: the daemon boots straight into MANUAL mode and is driven over its socket (Stream Deck brightness keys, disp-settings). AUTO mode is refused with SENSOR_UNAVAILABLE. The zones below are required by the config schema but unused.",
+
+  "_comment_output": "value_range is the MCU's 12-bit dimming value: 0 is backlight off, 40 (0x028) is the lowest value measured to light it, so 0 % stays just visible. The response is linear in the raw value (about 1.6 nits per count on full white), so response_exponent 2.2 bends the percent scale to step evenly to the eye: 0 % = raw 40 (~40 nits), 10 % = raw 66 (~90 nits), 50 % = raw 923 (~1,440 nits), 100 % = raw 4095. The MCU firmware sometimes overrides the requested level on its own (seen hot: display 1 jumped to ~4,800 nits, its 77 % thermal-derating level, even with single frames and no daemon running); the write-only daemon cannot see or correct that.",
+
+  "_comment_calibration": "calibrations/qvue_3x.csv is a REFERENCE table for display 1, interpolated from i1 Display Pro HL full-white spot readings on 2026-10-30, not a per-step sweep; values above 3,000 nits exceed the meter's rated range and 100 % is extrapolated.",
+
+  "sensor": {
+    "type": "null"
+  },
+  "output": {
+    "type": "qvue",
+    "device": "/dev/i2c-1",
+    "address": "0x32",
+    "displays": [1, 2, 3],
+    "value_range": [40, 4095],
+    "response_exponent": 2.2
+  },
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/data/als-dimmer/state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": false
+  },
+  "zones": [
+    {
+      "name": "manual",
+      "lux_range": [0, 100000],
+      "brightness_range": [0, 100],
+      "curve": "linear",
+      "step_sizes": { "large_up": 5, "large_down": 3, "medium_up": 2, "medium_down": 1, "small_up": 1, "small_down": 1 },
+      "error_thresholds": { "large": 30, "small": 10 }
+    }
+  ],
+  "notification": {
+    "enabled": true,
+    "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
+  },
+  "calibration": {
+    "enabled": false
+  },
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/qvue_3x.csv"
+  }
+}

@@ -180,6 +180,9 @@ std::unique_ptr<OutputInterface> createI2CDimmerOutput(const std::string& device
                                                         int max_native);
 std::unique_ptr<OutputInterface> createFPGASysfsOutput(const std::string& sysfs_path, int max_value);
 std::unique_ptr<OutputInterface> createIocTconOutput(const std::string& device, const std::string& address, int range_lo, int range_hi);
+std::unique_ptr<OutputInterface> createQvueOutput(const std::string& device, const std::string& address,
+                                                  const std::vector<int>& displays,
+                                                  int range_lo, int range_hi, double response_exponent);
 std::unique_ptr<OutputInterface> createBoePwmOutput(const std::string& i2c_device,
                                                      uint8_t i2c_address,
                                                      const std::string& pwm_chip,
@@ -257,6 +260,15 @@ std::unique_ptr<als_dimmer::OutputInterface> createOutput(const als_dimmer::Conf
             config.output.address,
             config.output.value_range[0],
             config.output.value_range[1]);
+    }
+    else if (config.output.type == "qvue") {
+        return als_dimmer::createQvueOutput(
+            config.output.device,
+            config.output.address,
+            config.output.qvue_displays,
+            config.output.value_range[0],
+            config.output.value_range[1],
+            config.output.qvue_response_exponent);
     }
     else if (config.output.type == "fpga_sysfs_dimmer") {
         return als_dimmer::createFPGASysfsOutput(

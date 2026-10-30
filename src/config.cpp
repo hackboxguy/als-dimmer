@@ -102,9 +102,21 @@ Config Config::loadFromFile(const std::string& filename) {
         // is the documented full scale; a panel whose bitstream differs sets
         // its own value_range rather than needing a new output type.
         config.output.value_range = { 0, 2048 };
+    } else if (config.output.type == "qvue") {
+        // The QVue MCU's 12-bit dimming value. 0 is "backlight off"; 40 (0x028)
+        // is the lowest value measured to light it, so 0 % stays visible.
+        config.output.value_range = { 40, 4095 };
     }
     if (output_json.contains("internal_range")) {
         config.output.internal_range = output_json["internal_range"].get<std::vector<int>>();
+    }
+
+    // qvue-specific fields (optional)
+    if (output_json.contains("displays")) {
+        config.output.qvue_displays = output_json["displays"].get<std::vector<int>>();
+    }
+    if (output_json.contains("response_exponent")) {
+        config.output.qvue_response_exponent = output_json["response_exponent"].get<double>();
     }
 
     // boe_pwm-specific fields (all optional with sane defaults)
@@ -654,6 +666,30 @@ void Config::validate() const {
             output.value_range[0] >= output.value_range[1] ||
             output.value_range[1] > 65535) {
             throw ConfigError("output.value_range must be [min, max] with 0 <= min < max <= 65535 for ioc_tcon output type (default [13, 2047])");
+        }
+    } else if (output.type == "qvue") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for qvue output type (the I2C bus the 983 is on, e.g. /dev/i2c-1)");
+        }
+        if (output.address.empty()) {
+            throw ConfigError("output.address is required for qvue output type (the QVue MCU slave, e.g. 0x32)");
+        }
+        if (output.value_range.size() != 2 ||
+            output.value_range[0] < 0 ||
+            output.value_range[0] >= output.value_range[1] ||
+            output.value_range[1] > 4095) {
+            throw ConfigError("output.value_range must be [min, max] with 0 <= min < max <= 4095 for qvue output type (default [40, 4095])");
+        }
+        if (output.qvue_displays.empty()) {
+            throw ConfigError("output.displays must list at least one display (1-4) for qvue output type");
+        }
+        for (int d : output.qvue_displays) {
+            if (d < 1 || d > 4) {
+                throw ConfigError("output.displays entries must be 1-4 (1 = main, 2..4 = sub 1..3) for qvue output type");
+            }
+        }
+        if (!(output.qvue_response_exponent >= 0.5 && output.qvue_response_exponent <= 4.0)) {
+            throw ConfigError("output.response_exponent must be 0.5-4.0 for qvue output type (1.0 = linear)");
         }
     } else if (output.type == "dimmer200" || output.type == "dimmer800" ||
                output.type == "dimmer2048") {

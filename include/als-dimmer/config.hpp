@@ -53,6 +53,12 @@ struct OutputConfig {
     std::string i2c_pwm_enable_register = "0x01";   // typically reg 0x01 = enable
     int i2c_pwm_enable_value            = 1;
     bool i2c_pwm_skip_enable            = false;    // when true, don't write enable on init
+
+    // qvue-specific fields (QVue projection display MCU behind the 983/988).
+    // The MCU dims each of its displays separately; the daemon drives all of
+    // them with one level. value_range is the MCU's 12-bit dimming scale.
+    std::vector<int> qvue_displays      = {1};      // 1 = main, 2..4 = sub 1..3
+    double qvue_response_exponent       = 1.0;      // raw = lo + (hi-lo) * (pct/100)^exp
 };
 
 struct StepSizes {
