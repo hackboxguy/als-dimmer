@@ -118,6 +118,9 @@ Config Config::loadFromFile(const std::string& filename) {
     if (output_json.contains("response_exponent")) {
         config.output.qvue_response_exponent = output_json["response_exponent"].get<double>();
     }
+    if (output_json.contains("off_at_zero")) {
+        config.output.qvue_off_at_zero = output_json["off_at_zero"].get<bool>();
+    }
 
     // boe_pwm-specific fields (all optional with sane defaults)
     if (output_json.contains("pwm_chip")) {

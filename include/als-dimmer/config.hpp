@@ -59,6 +59,7 @@ struct OutputConfig {
     // them with one level. value_range is the MCU's 12-bit dimming scale.
     std::vector<int> qvue_displays      = {1};      // 1 = main, 2..4 = sub 1..3
     double qvue_response_exponent       = 1.0;      // raw = lo + (hi-lo) * (pct/100)^exp
+    bool qvue_off_at_zero               = false;    // 0 % sends raw 0 (backlight off) instead of lo
 };
 
 struct StepSizes {

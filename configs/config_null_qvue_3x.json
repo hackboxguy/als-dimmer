@@ -3,7 +3,7 @@
 
   "_comment_sensor": "The QVue has no ambient light sensor, so sensor.type=null: the daemon boots straight into MANUAL mode and is driven over its socket (Stream Deck brightness keys, disp-settings). AUTO mode is refused with SENSOR_UNAVAILABLE. The zones below are required by the config schema but unused.",
 
-  "_comment_output": "value_range is the MCU's 12-bit dimming value: 0 is backlight off, 40 (0x028) is the lowest value measured to light it, so 0 % stays just visible. The response is linear in the raw value (about 1.6 nits per count on full white), so response_exponent 2.2 bends the percent scale to step evenly to the eye: 0 % = raw 40 (~40 nits), 10 % = raw 66 (~90 nits), 50 % = raw 923 (~1,440 nits), 100 % = raw 4095. The MCU firmware sometimes overrides the requested level on its own (seen hot: display 1 jumped to ~4,800 nits, its 77 % thermal-derating level, even with single frames and no daemon running); the write-only daemon cannot see or correct that.",
+  "_comment_output": "value_range is the MCU's 12-bit dimming value: 0 is backlight off, 40 (0x028) is the lowest value measured to light it, the floor for 1-100 %; off_at_zero makes 0 % switch the backlight off (raw 0). The response is linear in the raw value (about 1.6 nits per count on full white), so response_exponent 2.2 bends the percent scale to step evenly to the eye: 0 % = off, 1 % = raw 40 (~40 nits), 10 % = raw 66 (~90 nits), 50 % = raw 923 (~1,440 nits), 100 % = raw 4095. The MCU firmware sometimes overrides the requested level on its own (seen hot: display 1 jumped to ~4,800 nits, its 77 % thermal-derating level, even with single frames and no daemon running); the write-only daemon cannot see or correct that.",
 
   "_comment_calibration": "calibrations/qvue_3x.csv is a REFERENCE table for display 1, interpolated from i1 Display Pro HL full-white spot readings on 2026-10-30, not a per-step sweep; values above 3,000 nits exceed the meter's rated range and 100 % is extrapolated.",
 
@@ -16,7 +16,8 @@
     "address": "0x32",
     "displays": [1, 2, 3],
     "value_range": [40, 4095],
-    "response_exponent": 2.2
+    "response_exponent": 2.2,
+    "off_at_zero": true
   },
   "control": {
     "tcp_socket": {

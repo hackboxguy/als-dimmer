@@ -50,13 +50,18 @@ namespace als_dimmer {
  * full white, measured 2026-10-30), which makes linear percent steps far too
  * coarse at the dark end of a ~6,000-nit panel; response_exponent bends the
  * percent scale so the brightness buttons step evenly to the eye.
+ *
+ * off_at_zero makes 0 % switch the backlight off (raw 0) while 1-100 % keep
+ * the range above: lowering the floor instead would black out the whole
+ * dark end of the curve, since raw values below ~33 do not light it.
  */
 class QvueOutput : public OutputInterface {
 public:
     QvueOutput(const std::string& device, uint8_t address, const std::vector<int>& displays,
-               int range_lo, int range_hi, double response_exponent)
+               int range_lo, int range_hi, double response_exponent, bool off_at_zero)
         : device_(device), address_(address), displays_(displays),
           range_lo_(range_lo), range_hi_(range_hi), exponent_(response_exponent),
+          off_at_zero_(off_at_zero),
           i2c_fd_(-1), cached_percent_(-1), write_count_(0), fail_count_(0) {}
 
     ~QvueOutput() override {
@@ -73,7 +78,8 @@ public:
             std::cout << " " << d;
         }
         std::cout << ", raw range [" << range_lo_ << ", " << range_hi_
-                  << "], response exponent " << exponent_ << std::endl;
+                  << "], response exponent " << exponent_
+                  << (off_at_zero_ ? ", 0 % = off" : "") << std::endl;
 
         i2c_fd_ = open(device_.c_str(), O_RDWR);
         if (i2c_fd_ < 0) {
@@ -153,6 +159,9 @@ private:
     static const useconds_t kFrameGapUs = 150000;
 
     int percentToRaw(int pct) const {
+        if (pct == 0 && off_at_zero_) {
+            return 0;
+        }
         const double frac = std::pow(pct / 100.0, exponent_);
         return range_lo_ + static_cast<int>(std::lround(frac * (range_hi_ - range_lo_)));
     }
@@ -180,6 +189,7 @@ private:
     int range_lo_;
     int range_hi_;
     double exponent_;
+    bool off_at_zero_;
     int i2c_fd_;
     int cached_percent_;   // -1 = unknown, so the next update always writes
     unsigned write_count_;
@@ -191,10 +201,12 @@ std::unique_ptr<OutputInterface> createQvueOutput(const std::string& device,
                                                   const std::string& address_str,
                                                   const std::vector<int>& displays,
                                                   int range_lo, int range_hi,
-                                                  double response_exponent) {
+                                                  double response_exponent,
+                                                  bool off_at_zero) {
     uint8_t address = static_cast<uint8_t>(std::stoi(address_str, nullptr, 16));
     return std::unique_ptr<OutputInterface>(
-        new QvueOutput(device, address, displays, range_lo, range_hi, response_exponent));
+        new QvueOutput(device, address, displays, range_lo, range_hi, response_exponent,
+                       off_at_zero));
 }
 
 } // namespace als_dimmer

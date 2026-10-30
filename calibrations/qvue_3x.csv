@@ -3,9 +3,9 @@
 # output_type=qvue
 # timestamp=2026-10-30T21:00:00+01:00
 # source=interpolated from i1 Display Pro HL full-white spot readings on display 1 (raw 40-3276), not a per-step sweep
-# mapping=value_range [40, 4095], response_exponent 2.2
+# mapping=value_range [40, 4095], response_exponent 2.2, off_at_zero (0 % = backlight off)
 # caveat=readings above 3000 nits exceed the HL's rated range; 100 % (raw 4095) is extrapolated
-# nits_min=39.100 nits_max=6300.000 ok_rows=101
+# nits_min=0.000 nits_max=6300.000 ok_rows=101
 brightness_pct,nits,status,backlight_temp_c
 100,6300.0000,OK,
 99,6170.2600,OK,
@@ -107,4 +107,4 @@ brightness_pct,nits,status,backlight_temp_c
 3,44.1000,OK,
 2,41.6000,OK,
 1,39.1000,OK,
-0,39.1000,OK,
+0,0.0000,OK,
