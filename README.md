@@ -305,6 +305,8 @@ See `configs/` directory for sample configurations:
 - `config_fpga_opti4001_lux_dimmer2048.json` - Fixed-RTL FPGA OPTI4001 integer-lux reader + FPGA dimmer (16-bit native)
 - `config_ioc_opt5001_tcon_ots17.json` - OTS-OLED 17.3" panel: OPT5001 read through the ioc-deserializer MCU + panel TCON brightness through the same MCU
 - `config_ioc_opt5001_tcon_oledib17.json` - 17" OLED-IB panel: the same MCU path (display_manager v01.15+ finds its TCON at 0x62, range 11..2047); no OPT5001 fitted yet, so MANUAL only
+- `config_ioc_qvue_3x.json` - 3x QVue display board running rh850-baremetal display_manager (release 1.15+): output `qvue_ioc`, all three displays through the IOC at 0x66 (OUT_REQ `0x0240+4i`, guarded and read back), range [20, 2047] with exponent 2.2; no ambient sensor, so MANUAL only (Stream Deck keys)
+- `config_null_qvue_3x.json` - 3x QVue on the stock firmware or qvue_legacy: output `qvue`, the vendor Set Dimming protocol at 0x32 (write-only: any read there hangs the stock MCU), range [40, 4095]; MANUAL only. On display_manager these writes fail with EIO. `als-dimmer-select-config.sh` (br-wrapper) picks between the two QVue configs from the MCU's firmware at start-up
 - `config_can_als_file.json` - CAN ALS sensor + file output (for testing)
 - `config_simulation.json` - File-based simulation for testing
 
