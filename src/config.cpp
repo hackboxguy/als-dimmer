@@ -106,6 +106,11 @@ Config Config::loadFromFile(const std::string& filename) {
         // The QVue MCU's 12-bit dimming value. 0 is "backlight off"; 40 (0x028)
         // is the lowest value measured to light it, so 0 % stays visible.
         config.output.value_range = { 40, 4095 };
+    } else if (config.output.type == "qvue_ioc") {
+        // display_manager's FPGA level 1:1 (MAX 0x07FF), half the stock host
+        // scale; 20 is the stock floor 40 on this scale (the backlight lights
+        // from about 12-16 counts).
+        config.output.value_range = { 20, 2047 };
     }
     if (output_json.contains("internal_range")) {
         config.output.internal_range = output_json["internal_range"].get<std::vector<int>>();
@@ -669,6 +674,30 @@ void Config::validate() const {
             output.value_range[0] >= output.value_range[1] ||
             output.value_range[1] > 65535) {
             throw ConfigError("output.value_range must be [min, max] with 0 <= min < max <= 65535 for ioc_tcon output type (default [13, 2047])");
+        }
+    } else if (output.type == "qvue_ioc") {
+        if (output.device.empty()) {
+            throw ConfigError("output.device is required for qvue_ioc output type (the I2C bus the 983 is on, e.g. /dev/i2c-1)");
+        }
+        if (output.address.empty()) {
+            throw ConfigError("output.address is required for qvue_ioc output type (the display_manager IOC slave, 0x66)");
+        }
+        if (output.value_range.size() != 2 ||
+            output.value_range[0] < 0 ||
+            output.value_range[0] >= output.value_range[1] ||
+            output.value_range[1] > 2047) {
+            throw ConfigError("output.value_range must be [min, max] with 0 <= min < max <= 2047 for qvue_ioc output type (default [20, 2047])");
+        }
+        if (output.qvue_displays.empty()) {
+            throw ConfigError("output.displays must list at least one display (1-4) for qvue_ioc output type");
+        }
+        for (int d : output.qvue_displays) {
+            if (d < 1 || d > 4) {
+                throw ConfigError("output.displays entries must be 1-4 (display n = FPGA output n-1) for qvue_ioc output type");
+            }
+        }
+        if (!(output.qvue_response_exponent >= 0.5 && output.qvue_response_exponent <= 4.0)) {
+            throw ConfigError("output.response_exponent must be 0.5-4.0 for qvue_ioc output type (1.0 = linear)");
         }
     } else if (output.type == "qvue") {
         if (output.device.empty()) {

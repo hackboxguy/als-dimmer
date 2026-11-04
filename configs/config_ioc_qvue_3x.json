@@ -1,0 +1,83 @@
+{
+  "_comment_display": "3x QVue display board running rh850-baremetal display_manager (QVUE_9090, release 1.15+ / v01.00+) behind a DS90UH983/DS90UH988 link (hh983-serializer config_mode=2). The IOC at 0x66 sets each FPGA output's backlight level (OUT_REQ 0x0240+4i); the daemon drives all three with one level. Units still on the stock firmware or qvue_legacy use config_null_qvue_3x.json (vendor protocol at 0x32) instead; als-dimmer-select-config.sh picks between the two.",
+  "_comment_sensor": "The QVue has no ambient light sensor, so sensor.type=null: the daemon boots straight into MANUAL mode and is driven over its socket (Stream Deck brightness keys, disp-settings). AUTO mode is refused with SENSOR_UNAVAILABLE. The zones below are required by the config schema but unused.",
+  "_comment_output": "qvue_ioc: value_range is display_manager's FPGA level, 1:1 with MAX 0x07FF, half the stock host scale. The backlight lights from about 12-16 counts (rig 2026-11-04, i1 full white: 12 -> 1.8, 16 -> 14, 20 -> 35, 30 -> 83, 40 -> 115, 0x100 -> 868 nits), so [20, 2047] with response_exponent 2.2 is the stock config's [40, 4095] curve: 0 % = off (off_at_zero), 1 % = raw 20 (~35 nits), 50 % = raw ~461, 100 % = raw 2047. The firmware derates output 0 on its own (thermal bands); the daemon writes the request, the firmware applies what the derating allows. Every write is guarded and read back (983/988 0x67 rule).",
+  "_comment_calibration": "calibrations/qvue_ioc_3x.csv is the stock table (qvue_3x.csv) on this scale: the same percent gives about the same light. i1 spot checks 2026-11-04 through the daemon: within 10 % from 1 % to 40 %.",
+  "sensor": {
+    "type": "null"
+  },
+  "output": {
+    "type": "qvue_ioc",
+    "device": "/dev/i2c-1",
+    "address": "0x66",
+    "displays": [
+      1,
+      2,
+      3
+    ],
+    "value_range": [
+      20,
+      2047
+    ],
+    "response_exponent": 2.2,
+    "off_at_zero": true
+  },
+  "control": {
+    "tcp_socket": {
+      "enabled": true,
+      "listen_address": "127.0.0.1",
+      "listen_port": 9000
+    },
+    "unix_socket": {
+      "enabled": true,
+      "path": "/tmp/als-dimmer.sock",
+      "permissions": "0666",
+      "owner": "root",
+      "group": "root"
+    },
+    "update_interval_ms": 500,
+    "sensor_error_timeout_sec": 300,
+    "fallback_brightness": 50,
+    "state_file": "/data/als-dimmer/state.json",
+    "auto_resume_timeout_sec": 60,
+    "log_level": "info",
+    "minimal_i2c": false
+  },
+  "zones": [
+    {
+      "name": "manual",
+      "lux_range": [
+        0,
+        100000
+      ],
+      "brightness_range": [
+        0,
+        100
+      ],
+      "curve": "linear",
+      "step_sizes": {
+        "large_up": 5,
+        "large_down": 3,
+        "medium_up": 2,
+        "medium_down": 1,
+        "small_up": 1,
+        "small_down": 1
+      },
+      "error_thresholds": {
+        "large": 30,
+        "small": 10
+      }
+    }
+  ],
+  "notification": {
+    "enabled": true,
+    "on_change_script": "/home/pi/streamdeck-ctrl/screens/display-control/scripts/als-dimmer-notify.sh"
+  },
+  "calibration": {
+    "enabled": false
+  },
+  "brightness_to_nits": {
+    "enabled": true,
+    "sweep_table": "calibrations/qvue_ioc_3x.csv"
+  }
+}
