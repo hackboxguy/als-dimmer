@@ -19,6 +19,7 @@ struct PersistentState {
     int last_auto_brightness = 50;
     int brightness_offset = 0;
     bool ld_dynamic_enabled = true;    // dynamic local dimming switch (local_dimming_profiles)
+    int privacy_level = 0;             // privacy-light level %, held on the display IOC (privacy_light.hpp)
     std::string last_updated;
 };
 
@@ -50,6 +51,8 @@ public:
     int getLastAutoBrightness() const { return state_.last_auto_brightness; }
     bool getLdDynamicEnabled() const { return state_.ld_dynamic_enabled; }
     void setLdDynamicEnabled(bool enabled);
+    int getPrivacyLevel() const { return state_.privacy_level; }
+    void setPrivacyLevel(int level);
     void setLastAutoBrightness(int brightness);
 
     // Mark state as dirty (needs save)

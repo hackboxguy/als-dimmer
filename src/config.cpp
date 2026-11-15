@@ -465,6 +465,23 @@ Config Config::loadFromFile(const std::string& filename) {
         }
     }
 
+    // Parse privacy_light (optional; on by default, detected at run time).
+    if (j.contains("privacy_light")) {
+        auto& pj = j["privacy_light"];
+        auto& pl = config.privacy_light;
+        if (pj.contains("enabled")) pl.enabled = pj["enabled"].get<bool>();
+        if (pj.contains("i2c_device")) pl.i2c_device = pj["i2c_device"].get<std::string>();
+        if (pj.contains("i2c_address")) {
+            pl.i2c_address = pj["i2c_address"].is_string()
+                ? static_cast<int>(std::stol(pj["i2c_address"].get<std::string>(), nullptr, 0))
+                : pj["i2c_address"].get<int>();
+        }
+        if (pj.contains("poll_interval_sec")) pl.poll_interval_sec = pj["poll_interval_sec"].get<int>();
+        if (pl.i2c_address < 0x03 || pl.i2c_address > 0x77 || pl.poll_interval_sec < 1) {
+            throw ConfigError("privacy_light: i2c_address must be 0x03..0x77 and poll_interval_sec >= 1");
+        }
+    }
+
     // Parse local_dimming_profiles (optional, pixelpipe FPGA day/night LD profile).
     // Values are raw register bytes (integers or hex strings); see ld_profile.hpp.
     if (j.contains("local_dimming_profiles")) {

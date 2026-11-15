@@ -247,6 +247,16 @@ struct ThermalLimitConfig {
     double valid_max_c = 110.0;
 };
 
+// Privacy-light level on the display IOC (privacy_light.hpp). On by default: the
+// light is detected at run time (0x66 0x0203 answers 0x00/0x01), so no config
+// has to name it; "privacy_light": {"enabled": false} stops the probing.
+struct PrivacyLightConfig {
+    bool enabled = true;
+    std::string i2c_device = "/dev/i2c-1";
+    int i2c_address = 0x66;
+    int poll_interval_sec = 5;             // re-check / re-assert period once found
+};
+
 struct Config {
     SensorConfig sensor;
     OutputConfig output;
@@ -259,6 +269,7 @@ struct Config {
     WhitePointCalibrationConfig white_point_calibration;
     LdProfileConfig ld_profiles;
     ThermalLimitConfig thermal_limit;
+    PrivacyLightConfig privacy_light;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);

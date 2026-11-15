@@ -509,6 +509,29 @@ of small content. Concept and measurements: pixelpipe-fpga `docs/dynamic-local-d
   brightness) and APL (`0x48`), and the thermal limiter state. disp-settings shows these in the
   Panel features card.
 
+### Privacy light (S4 display, automatic)
+
+The S4 display IOC (`display_manager_s4` v01.12+, sp6bins release 1.25) drives a privacy light guide
+through a 2 kHz PWM whose level, 0-100 %, is the IOC register `0x0202` on `0x66`; `0x0203` reads
+`0x01` while it runs and `0x00` while the display is off. The MCU forgets the level at every reset,
+so als-dimmer holds it:
+
+- **Detection, no config needed:** one 2-byte read of `0x0202`/`0x0203`. Both registers are reserved
+  on every RH850 display (`0xFF` = no privacy light), so this works whatever the output type is.
+  Probed every 5 s for 2 minutes, then once a minute, until found.
+- **Persistence:** the level is `privacy_level` in the state file (on the image
+  `/data/als-dimmer/state.json`), 0 % on a fresh unit. It is written to the IOC when the light is
+  found, and re-checked every `poll_interval_sec` (5 s): an S4 that reset without the Pi (OTA,
+  display-only power loss) gets the level back within one period.
+- **Commands:** `{"command":"set_privacy_level","params":{"level":40}}` applies (write + read-back)
+  and saves; `"persist": false` applies without saving (a slider while it is dragged).
+  `{"command":"get_privacy_status"}` and every `get_status` report
+  `"privacy": {"available", "level", "running", "reachable", "mcu_level"}`; disp-settings shows its
+  Privacy light slider only when `available` is true. `set_privacy_level` answers `NOT_AVAILABLE`
+  on displays without the light.
+- **Config (optional):** `"privacy_light": {"enabled": false}` stops the probing;
+  `i2c_device` (`/dev/i2c-1`), `i2c_address` (`0x66`) and `poll_interval_sec` (5) can be changed.
+
 ### Thermal limiter (optional)
 
 Keeps the backlight temperature at about `start_c`. It reads the temperature through the

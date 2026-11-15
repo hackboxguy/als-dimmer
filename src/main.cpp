@@ -2,6 +2,7 @@
 #include "als-dimmer/interfaces.hpp"
 #include "als-dimmer/state_manager.hpp"
 #include "als-dimmer/control_interface.hpp"
+#include "als-dimmer/privacy_light.hpp"
 #include "als-dimmer/zone_mapper.hpp"
 #include "als-dimmer/brightness_controller.hpp"
 #include "als-dimmer/csv_logger.hpp"
@@ -371,7 +372,8 @@ std::string processCommand(const std::string& command,
                           const std::string& output_type,
                           const als_dimmer::ThermalCompensation& thermal,
                           als_dimmer::LdProfileController* ld_profile,
-                          const als_dimmer::ThermalLimiter& thermal_limit) {
+                          const als_dimmer::ThermalLimiter& thermal_limit,
+                          als_dimmer::PrivacyLight& privacy) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -425,6 +427,17 @@ std::string processCommand(const std::string& command,
                     }
 
                     bool thermal_has_reading = thermal.hasReading();
+                    // Additive fields for status clients: the thermal limiter (when enabled) and
+                    // the privacy light (always; "available": false where the display has none,
+                    // and absent from older daemons, so a UI shows its slider only when true).
+                    json status_extra = json::object();
+                    if (thermal_limit.enabled()) {
+                        status_extra["backlight_temp_c"] = thermal_has_reading ? json(thermal.lastTempC()) : json(nullptr);
+                        status_extra["thermal_limit_percent"] = thermal_limit.factorPercent();
+                        status_extra["thermal_limiting"] = thermal_limit.factorPercent() < 100 ||
+                                                           thermal_limit.boostSuppressed();
+                    }
+                    status_extra["privacy"] = privacy.status();
                     return generateStatusResponse(
                         mode_str,
                         current_brightness,
@@ -438,13 +451,8 @@ std::string processCommand(const std::string& command,
                         thermal_has_reading ? thermal.lastTempC() : 0.0,
                         thermal_has_reading ? thermal.factor() : 1.0,
                         // The backlight temperature is also read when only the thermal limiter
-                        // uses it (no compensation table): report it, and the limit, here too.
-                        thermal_limit.enabled()
-                            ? json{{"backlight_temp_c", thermal_has_reading ? json(thermal.lastTempC()) : json(nullptr)},
-                                   {"thermal_limit_percent", thermal_limit.factorPercent()},
-                                   {"thermal_limiting", thermal_limit.factorPercent() < 100 ||
-                                                         thermal_limit.boostSuppressed()}}
-                            : json::object()
+                        // uses it (no compensation table): it is reported, with the limit, here too.
+                        status_extra
                     );
                 }
 
@@ -728,6 +736,41 @@ std::string processCommand(const std::string& command,
                                             en ? "Dynamic local dimming on" : "Dynamic local dimming off", data);
                 }
 
+                case CommandType::GET_PRIVACY_STATUS: {
+                    json data;
+                    data["privacy"] = privacy.status();
+                    return generateResponse(ResponseStatus::SUCCESS, "Privacy status", data);
+                }
+
+                case CommandType::SET_PRIVACY_LEVEL: {
+                    const json& p = parsed_cmd.params;
+                    if (!p.contains("level") || !p["level"].is_number_integer()) {
+                        return generateErrorResponse("set_privacy_level needs params.level (0..100)",
+                                                     "INVALID_PARAMS");
+                    }
+                    const int level = p["level"].get<int>();
+                    if (level < 0 || level > 100) {
+                        return generateErrorResponse("privacy level must be 0..100", "INVALID_PARAMS");
+                    }
+                    if (!privacy.available()) {
+                        return generateErrorResponse("no privacy light on this display", "NOT_AVAILABLE");
+                    }
+                    // persist=false while a slider is being dragged: the level is applied at
+                    // once but the state file (fsync'd to /data) is written on release only.
+                    const bool persist = !p.contains("persist") || !p["persist"].is_boolean() ||
+                                         p["persist"].get<bool>();
+                    const bool took = privacy.apply(level);
+                    state_mgr.setPrivacyLevel(level);
+                    if (persist) {
+                        state_mgr.save();
+                    }
+                    json data;
+                    data["privacy"] = privacy.status();
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                            took ? "Privacy level set" : "Privacy level saved; the display did not take it yet",
+                                            data);
+                }
+
                 case CommandType::UNKNOWN:
                 default:
                     return generateErrorResponse("Unknown command type", "UNKNOWN_COMMAND");
@@ -953,6 +996,14 @@ int main(int argc, char* argv[]) {
         LOG_INFO("main", "thermal_compensation disabled or not configured");
     }
 
+    // Privacy light on the display IOC (privacy_light.hpp): found at run time, holds the saved
+    // level (0 % on a fresh unit) and writes it again whenever the MCU has lost it.
+    als_dimmer::PrivacyLight privacy(config.privacy_light);
+    privacy.setDesired(state_mgr.getPrivacyLevel());
+    if (!config.privacy_light.enabled) {
+        LOG_INFO("main", "Privacy light disabled in the config");
+    }
+
     // Thermal limiter: needs temperature readings only. If thermal compensation did not start the
     // poller (no factor table / disabled), start it here from the same temperature source config.
     als_dimmer::ThermalLimiter thermal_limiter(config.thermal_limit,
@@ -1045,6 +1096,9 @@ int main(int argc, char* argv[]) {
     std::string manual_override_type = "";
 
     while (!should_exit && !g_shutdown_requested.load()) {
+        // Privacy light: find it / re-assert the level (I2C only when a check is due)
+        privacy.poll();
+
         // Process TCP commands
         while (control.hasCommand()) {
             als_dimmer::QueuedCommand queued = control.getNextCommand();
@@ -1055,7 +1109,8 @@ int main(int argc, char* argv[]) {
                                                   manual_override_occurred, manual_override_type,
                                                   notifier, sensor_available,
                                                   b2n_lut, output->getType(),
-                                                  thermal, ld_profile.get(), thermal_limiter);
+                                                  thermal, ld_profile.get(), thermal_limiter,
+                                                  privacy);
             control.sendResponseTo(queued.client_fd, response);
             if (queued.close_after_response && queued.client_fd >= 0) {
                 close(queued.client_fd);

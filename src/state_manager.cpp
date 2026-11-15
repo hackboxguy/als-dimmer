@@ -55,6 +55,11 @@ bool StateManager::load() {
             state_.ld_dynamic_enabled = j["ld_dynamic_enabled"].get<bool>();
         }
 
+        if (j.contains("privacy_level") && j["privacy_level"].is_number_integer()) {
+            const int lv = j["privacy_level"].get<int>();
+            state_.privacy_level = (lv < 0) ? 0 : (lv > 100 ? 100 : lv);
+        }
+
         if (j.contains("last_updated")) {
             state_.last_updated = j["last_updated"].get<std::string>();
         }
@@ -92,6 +97,7 @@ bool StateManager::save() {
     j["last_auto_brightness"] = state_.last_auto_brightness;
     j["brightness_offset"] = state_.brightness_offset;
     j["ld_dynamic_enabled"] = state_.ld_dynamic_enabled;
+    j["privacy_level"] = state_.privacy_level;
     j["last_updated"] = state_.last_updated;
 
     // Write atomically: a power cut while writing the file in place could leave it
@@ -144,6 +150,13 @@ void StateManager::setMode(OperatingMode mode) {
 void StateManager::setLdDynamicEnabled(bool enabled) {
     if (state_.ld_dynamic_enabled != enabled) {
         state_.ld_dynamic_enabled = enabled;
+        dirty_ = true;
+    }
+}
+
+void StateManager::setPrivacyLevel(int level) {
+    if (state_.privacy_level != level) {
+        state_.privacy_level = level;
         dirty_ = true;
     }
 }

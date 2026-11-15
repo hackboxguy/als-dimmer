@@ -27,6 +27,8 @@ enum class CommandType {
     GET_CALIBRATION_INFO,
     GET_LD_STATUS,      // dynamic local dimming + thermal limiter status
     SET_LD_DYNAMIC,     // params {"enabled": bool}: dynamic local dimming switch (persisted)
+    GET_PRIVACY_STATUS, // privacy-light level on the display IOC (also in get_status as "privacy")
+    SET_PRIVACY_LEVEL,  // params {"level": 0..100, "persist": bool (default true)}
     UNKNOWN
 };
 

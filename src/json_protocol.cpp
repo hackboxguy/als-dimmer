@@ -46,6 +46,10 @@ ParsedCommand parseCommand(const std::string& json_str) {
         cmd.type = CommandType::GET_LD_STATUS;
     } else if (command_str == "set_ld_dynamic") {
         cmd.type = CommandType::SET_LD_DYNAMIC;
+    } else if (command_str == "get_privacy_status") {
+        cmd.type = CommandType::GET_PRIVACY_STATUS;
+    } else if (command_str == "set_privacy_level") {
+        cmd.type = CommandType::SET_PRIVACY_LEVEL;
     } else {
         cmd.type = CommandType::UNKNOWN;
     }
@@ -161,6 +165,10 @@ std::string commandTypeToString(CommandType type) {
             return "get_ld_status";
         case CommandType::SET_LD_DYNAMIC:
             return "set_ld_dynamic";
+        case CommandType::GET_PRIVACY_STATUS:
+            return "get_privacy_status";
+        case CommandType::SET_PRIVACY_LEVEL:
+            return "set_privacy_level";
         case CommandType::UNKNOWN:
         default:
             return "unknown";

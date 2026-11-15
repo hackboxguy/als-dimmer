@@ -26,6 +26,7 @@ set(CORE_SOURCES
     src/wp_adjust_restore.cpp
     src/ld_profile.cpp
     src/thermal_limit.cpp
+    src/privacy_light.cpp
     src/sensors/file_sensor.cpp
     src/sensors/opti4001_sensor.cpp
     src/sensors/fpga_opti4001_sensor.cpp
