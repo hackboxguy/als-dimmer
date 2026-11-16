@@ -3,6 +3,7 @@
 #include "als-dimmer/state_manager.hpp"
 #include "als-dimmer/control_interface.hpp"
 #include "als-dimmer/privacy_light.hpp"
+#include "als-dimmer/privacy_mode.hpp"
 #include "als-dimmer/zone_mapper.hpp"
 #include "als-dimmer/brightness_controller.hpp"
 #include "als-dimmer/csv_logger.hpp"
@@ -373,7 +374,8 @@ std::string processCommand(const std::string& command,
                           const als_dimmer::ThermalCompensation& thermal,
                           als_dimmer::LdProfileController* ld_profile,
                           const als_dimmer::ThermalLimiter& thermal_limit,
-                          als_dimmer::PrivacyLight& privacy) {
+                          als_dimmer::PrivacyLight& privacy,
+                          als_dimmer::PrivacyMode& privacy_mode) {
     (void)control;  // Reserved for future use (broadcasting status updates)
 
     using namespace als_dimmer::protocol;
@@ -438,6 +440,7 @@ std::string processCommand(const std::string& command,
                                                            thermal_limit.boostSuppressed();
                     }
                     status_extra["privacy"] = privacy.status();
+                    status_extra["privacy_mode"] = privacy_mode.status();
                     return generateStatusResponse(
                         mode_str,
                         current_brightness,
@@ -771,6 +774,34 @@ std::string processCommand(const std::string& command,
                                             data);
                 }
 
+                case CommandType::GET_PRIVACY_MODE: {
+                    json data;
+                    data["privacy_mode"] = privacy_mode.status();
+                    return generateResponse(ResponseStatus::SUCCESS, "Privacy mode status", data);
+                }
+
+                case CommandType::SET_PRIVACY_MODE: {
+                    const json& p = parsed_cmd.params;
+                    if (!p.contains("enabled") || !p["enabled"].is_boolean()) {
+                        return generateErrorResponse("set_privacy_mode needs params.enabled (true/false)",
+                                                     "INVALID_PARAMS");
+                    }
+                    if (!privacy_mode.available()) {
+                        return generateErrorResponse("this display's FPGA image has no privacy drive",
+                                                     "NOT_AVAILABLE");
+                    }
+                    const bool on = p["enabled"].get<bool>();
+                    const bool took = privacy_mode.apply(on);
+                    state_mgr.setPrivacyMode(on);
+                    state_mgr.save();
+                    json data;
+                    data["privacy_mode"] = privacy_mode.status();
+                    return generateResponse(ResponseStatus::SUCCESS,
+                                            took ? (on ? "Privacy on" : "Privacy off")
+                                                 : "Privacy saved; the FPGA did not take it yet",
+                                            data);
+                }
+
                 case CommandType::UNKNOWN:
                 default:
                     return generateErrorResponse("Unknown command type", "UNKNOWN_COMMAND");
@@ -1004,6 +1035,15 @@ int main(int argc, char* argv[]) {
         LOG_INFO("main", "Privacy light disabled in the config");
     }
 
+    // Privacy film in the display FPGA (privacy_mode.hpp): 0x1E preferred, 0x1D if that is all
+    // that answers; offered on supported images only. Holds the saved choice (OFF on a fresh
+    // unit) and writes it again after every FPGA restart.
+    als_dimmer::PrivacyMode privacy_mode(config.privacy_mode);
+    privacy_mode.setDesired(state_mgr.getPrivacyMode());
+    if (!config.privacy_mode.enabled) {
+        LOG_INFO("main", "Privacy mode disabled in the config");
+    }
+
     // Thermal limiter: needs temperature readings only. If thermal compensation did not start the
     // poller (no factor table / disabled), start it here from the same temperature source config.
     als_dimmer::ThermalLimiter thermal_limiter(config.thermal_limit,
@@ -1098,6 +1138,7 @@ int main(int argc, char* argv[]) {
     while (!should_exit && !g_shutdown_requested.load()) {
         // Privacy light: find it / re-assert the level (I2C only when a check is due)
         privacy.poll();
+        privacy_mode.poll();
 
         // Process TCP commands
         while (control.hasCommand()) {
@@ -1110,7 +1151,7 @@ int main(int argc, char* argv[]) {
                                                   notifier, sensor_available,
                                                   b2n_lut, output->getType(),
                                                   thermal, ld_profile.get(), thermal_limiter,
-                                                  privacy);
+                                                  privacy, privacy_mode);
             control.sendResponseTo(queued.client_fd, response);
             if (queued.close_after_response && queued.client_fd >= 0) {
                 close(queued.client_fd);

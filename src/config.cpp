@@ -1,5 +1,6 @@
 #include "als-dimmer/config.hpp"
 #include "json.hpp"
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -479,6 +480,42 @@ Config Config::loadFromFile(const std::string& filename) {
         if (pj.contains("poll_interval_sec")) pl.poll_interval_sec = pj["poll_interval_sec"].get<int>();
         if (pl.i2c_address < 0x03 || pl.i2c_address > 0x77 || pl.poll_interval_sec < 1) {
             throw ConfigError("privacy_light: i2c_address must be 0x03..0x77 and poll_interval_sec >= 1");
+        }
+    }
+
+    // Parse privacy_mode (optional; on by default, detected at run time).
+    if (j.contains("privacy_mode")) {
+        auto& pj = j["privacy_mode"];
+        auto& pm = config.privacy_mode;
+        if (pj.contains("enabled")) pm.enabled = pj["enabled"].get<bool>();
+        if (pj.contains("i2c_device")) pm.i2c_device = pj["i2c_device"].get<std::string>();
+        if (pj.contains("poll_interval_sec")) pm.poll_interval_sec = pj["poll_interval_sec"].get<int>();
+        if (pj.contains("require_ota_slot")) pm.require_ota_slot = pj["require_ota_slot"].get<bool>();
+        if (pm.poll_interval_sec < 1) {
+            throw ConfigError("privacy_mode: poll_interval_sec must be >= 1");
+        }
+        if (pj.contains("supported")) {
+            if (!pj["supported"].is_array()) {
+                throw ConfigError("privacy_mode.supported must be an array");
+            }
+            pm.supported.clear();
+            for (const auto& row : pj["supported"]) {
+                PrivacyModeImage img;
+                img.chip_id = row.value("chip_id", std::string());
+                for (auto& c : img.chip_id) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                const auto& mv = row.contains("min_version") ? row["min_version"] : json(0);
+                img.min_version = mv.is_string()
+                    ? static_cast<int>(std::stol(mv.get<std::string>(), nullptr, 0))
+                    : mv.get<int>();
+                img.name = row.value("name", img.chip_id);
+                if (img.chip_id.size() != 8 ||
+                    img.chip_id.find_first_not_of("0123456789ABCDEF") != std::string::npos ||
+                    img.min_version < 0 || img.min_version > 0xFF) {
+                    throw ConfigError("privacy_mode.supported: chip_id must be 8 hex digits and "
+                                      "min_version 0..0xFF");
+                }
+                pm.supported.push_back(img);
+            }
         }
     }
 

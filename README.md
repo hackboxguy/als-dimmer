@@ -532,6 +532,34 @@ so als-dimmer holds it:
 - **Config (optional):** `"privacy_light": {"enabled": false}` stops the probing;
   `i2c_device` (`/dev/i2c-1`), `i2c_address` (`0x66`) and `poll_interval_sec` (5) can be changed.
 
+### Privacy mode (FPGA privacy film on/off, automatic)
+
+Pixelpipe FPGA images that drive the privacy film (FOG) switch it with bit 0 of page-0 register
+`0x34` (`1` = on), R/W on both FPGA slaves. The FPGA powers up OFF and forgets the setting at every
+restart (power cycle, `update-fpga.sh --activate`, JTAG), so als-dimmer holds it:
+
+- **Slave:** `0x1E` whenever it answers (always naming page 0, since page-1 `0x34` is
+  `ALS_STATUS`; reads are one repeated-start transfer); `0x1D` only when `0x1E` does not.
+- **Offered only where the film is driven:** the FPGA answers on `0x1E`, its chip ID (page-0 `0x10`)
+  and image version (byte 3 of `0x00`) match a row of `supported`, and it runs the OTA slot
+  (`0x1A` = `0x5A`), not GOLDEN. Built in: 12.3" NQ5 `00010123` v0x8B+, 14.6" EJ scan `01000146`
+  v0x8C+, 14.6" direct `00000146` v0x8D+. A `0x1D`-only FPGA (vendor or pre-`0x1E` image) is
+  reported but never written. The identity is read twice before it changes the decision.
+- **Persistence:** the choice is `privacy_mode` (true/false) in the state file, OFF on a fresh unit.
+  It is written when a supported image is found and re-checked every `poll_interval_sec` (5 s): any
+  difference (FPGA restart, a write from another tool) is written back. Writes are read back
+  (bit 0) and retried up to 3 times.
+- **Commands:** `{"command":"set_privacy_mode","params":{"enabled":true}}` applies and saves
+  (`NOT_AVAILABLE` where the image has no drive). `{"command":"get_privacy_mode"}` and every
+  `get_status` report `"privacy_mode": {"available", "enabled", "fpga_on", "reachable", "slave",
+  "reason"}`, plus `"chip_id"`, `"version"`, `"slot"` once identified. `enabled` is the saved
+  choice, `fpga_on` the FPGA's read-back. disp-settings shows its Privacy tile only when
+  `available` is true.
+- **Config (optional):** `"privacy_mode": {"enabled": false}` stops the probing; `i2c_device`,
+  `poll_interval_sec` (5) and `require_ota_slot` (true) can be changed, and
+  `"supported": [{"chip_id": "00010123", "min_version": "0x8B", "name": "12.3\" NQ5"}, ...]`
+  replaces the built-in list (a new board or image needs no rebuild).
+
 ### Thermal limiter (optional)
 
 Keeps the backlight temperature at about `start_c`. It reads the temperature through the

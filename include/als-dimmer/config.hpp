@@ -257,6 +257,29 @@ struct PrivacyLightConfig {
     int poll_interval_sec = 5;             // re-check / re-assert period once found
 };
 
+// Privacy film on/off in the display FPGA (privacy_mode.hpp): page-0 reg 0x34
+// bit 0. On by default, detected at run time; the switch is offered only on the
+// images listed here (chip ID at page-0 0x10, image version = byte 3 of 0x00),
+// running their OTA slot. "privacy_mode": {"enabled": false} stops the probing;
+// a "supported" array replaces the built-in list.
+struct PrivacyModeImage {
+    std::string chip_id;     // 8 hex digits, e.g. "00010123"
+    int min_version = 0;     // first image (VV) that drives the film
+    std::string name;
+};
+
+struct PrivacyModeConfig {
+    bool enabled = true;
+    std::string i2c_device = "/dev/i2c-1";
+    int poll_interval_sec = 5;             // re-check / re-assert period
+    bool require_ota_slot = true;          // GOLDEN images have no privacy drive
+    std::vector<PrivacyModeImage> supported = {
+        {"00010123", 0x8B, "12.3\" NQ5"},
+        {"01000146", 0x8C, "14.6\" EJ scan"},
+        {"00000146", 0x8D, "14.6\" direct"},
+    };
+};
+
 struct Config {
     SensorConfig sensor;
     OutputConfig output;
@@ -270,6 +293,7 @@ struct Config {
     LdProfileConfig ld_profiles;
     ThermalLimitConfig thermal_limit;
     PrivacyLightConfig privacy_light;
+    PrivacyModeConfig privacy_mode;
 
     // Load configuration from JSON file
     static Config loadFromFile(const std::string& filename);

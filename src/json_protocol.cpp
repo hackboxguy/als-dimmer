@@ -50,6 +50,10 @@ ParsedCommand parseCommand(const std::string& json_str) {
         cmd.type = CommandType::GET_PRIVACY_STATUS;
     } else if (command_str == "set_privacy_level") {
         cmd.type = CommandType::SET_PRIVACY_LEVEL;
+    } else if (command_str == "get_privacy_mode") {
+        cmd.type = CommandType::GET_PRIVACY_MODE;
+    } else if (command_str == "set_privacy_mode") {
+        cmd.type = CommandType::SET_PRIVACY_MODE;
     } else {
         cmd.type = CommandType::UNKNOWN;
     }
@@ -169,6 +173,10 @@ std::string commandTypeToString(CommandType type) {
             return "get_privacy_status";
         case CommandType::SET_PRIVACY_LEVEL:
             return "set_privacy_level";
+        case CommandType::GET_PRIVACY_MODE:
+            return "get_privacy_mode";
+        case CommandType::SET_PRIVACY_MODE:
+            return "set_privacy_mode";
         case CommandType::UNKNOWN:
         default:
             return "unknown";
