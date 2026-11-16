@@ -48,6 +48,22 @@ void Notifier::emitZoneChanged(const std::string& zone) {
     invokeScript("zone_changed", zone);
 }
 
+void Notifier::emitPrivacyChanged(const std::string& state) {
+    if (!isEnabled()) return;
+    if (state == last_privacy_) return;
+
+    last_privacy_ = state;
+    invokeScript("privacy_changed", state);
+}
+
+void Notifier::emitPrivacyLevelChanged(const std::string& level) {
+    if (!isEnabled()) return;
+    if (level == last_privacy_level_) return;
+
+    last_privacy_level_ = level;
+    invokeScript("privacy_level_changed", level);
+}
+
 void Notifier::invokeScript(const std::string& event_type, const std::string& value) {
     LOG_DEBUG("Notifier", "Emitting " << event_type << " = " << value);
 

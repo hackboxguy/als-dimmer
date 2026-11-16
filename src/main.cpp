@@ -746,17 +746,24 @@ std::string processCommand(const std::string& command,
                 }
 
                 case CommandType::SET_PRIVACY_LEVEL: {
+                    // {"level": 0..100} or {"delta": +/-N} (a step from the held level, clamped:
+                    // one request, so two quick key presses cannot race)
                     const json& p = parsed_cmd.params;
-                    if (!p.contains("level") || !p["level"].is_number_integer()) {
-                        return generateErrorResponse("set_privacy_level needs params.level (0..100)",
-                                                     "INVALID_PARAMS");
-                    }
-                    const int level = p["level"].get<int>();
-                    if (level < 0 || level > 100) {
-                        return generateErrorResponse("privacy level must be 0..100", "INVALID_PARAMS");
+                    const bool has_level = p.contains("level") && p["level"].is_number_integer();
+                    const bool has_delta = p.contains("delta") && p["delta"].is_number_integer();
+                    if (has_level == has_delta) {
+                        return generateErrorResponse("set_privacy_level needs params.level (0..100) or "
+                                                     "params.delta (+/-N)", "INVALID_PARAMS");
                     }
                     if (!privacy.available()) {
                         return generateErrorResponse("no privacy light on this display", "NOT_AVAILABLE");
+                    }
+                    int level = has_level ? p["level"].get<int>() : privacy.desired() + p["delta"].get<int>();
+                    if (has_delta) {
+                        level = std::max(0, std::min(100, level));
+                    }
+                    if (level < 0 || level > 100) {
+                        return generateErrorResponse("privacy level must be 0..100", "INVALID_PARAMS");
                     }
                     // persist=false while a slider is being dragged: the level is applied at
                     // once but the state file (fsync'd to /data) is written on release only.
@@ -781,16 +788,20 @@ std::string processCommand(const std::string& command,
                 }
 
                 case CommandType::SET_PRIVACY_MODE: {
+                    // {"enabled": true/false} or {"toggle": true}
                     const json& p = parsed_cmd.params;
-                    if (!p.contains("enabled") || !p["enabled"].is_boolean()) {
-                        return generateErrorResponse("set_privacy_mode needs params.enabled (true/false)",
-                                                     "INVALID_PARAMS");
+                    const bool has_enabled = p.contains("enabled") && p["enabled"].is_boolean();
+                    const bool toggle = p.contains("toggle") && p["toggle"].is_boolean() &&
+                                        p["toggle"].get<bool>();
+                    if (has_enabled == toggle) {
+                        return generateErrorResponse("set_privacy_mode needs params.enabled (true/false) "
+                                                     "or params.toggle (true)", "INVALID_PARAMS");
                     }
                     if (!privacy_mode.available()) {
                         return generateErrorResponse("this display's FPGA image has no privacy drive",
                                                      "NOT_AVAILABLE");
                     }
-                    const bool on = p["enabled"].get<bool>();
+                    const bool on = toggle ? !privacy_mode.desired() : p["enabled"].get<bool>();
                     const bool took = privacy_mode.apply(on);
                     state_mgr.setPrivacyMode(on);
                     state_mgr.save();
@@ -1135,6 +1146,15 @@ int main(int argc, char* argv[]) {
     bool manual_override_occurred = false;
     std::string manual_override_type = "";
 
+    // Privacy state for the on_change_script (Stream Deck keys): the held choice, whoever set it
+    // (a key, disp-settings) and whatever re-applied it. The notifier drops repeats.
+    auto emitPrivacy = [&]() {
+        notifier.emitPrivacyChanged(!privacy_mode.available() ? "unavailable"
+                                    : (privacy_mode.desired() ? "on" : "off"));
+        notifier.emitPrivacyLevelChanged(!privacy.available() ? "unavailable"
+                                         : std::to_string(privacy.desired()));
+    };
+
     // Answer queued control commands. Runs at the top of every loop pass and, between passes,
     // every 10 ms of the update-interval sleep, so a client waits ~10 ms instead of up to a whole
     // interval (500 ms); the control loop itself keeps its rhythm.
@@ -1160,12 +1180,14 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
+        emitPrivacy();
     };
 
     while (!should_exit && !g_shutdown_requested.load()) {
         // Privacy light: find it / re-assert the level (I2C only when a check is due)
         privacy.poll();
         privacy_mode.poll();
+        emitPrivacy();
 
         // Process TCP commands
         drainCommands();

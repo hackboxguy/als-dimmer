@@ -54,12 +54,17 @@ struct CommandConfig {
         SET_ABSOLUTE_BRIGHTNESS,
         GET_MAX_BRIGHTNESS,
         GET_MIN_BRIGHTNESS,
-        GET_CALIBRATION_INFO
+        GET_CALIBRATION_INFO,
+        GET_PRIVACY,          // privacy film: on / off / --
+        SET_PRIVACY,          // mode = "on" / "off" / "toggle"
+        GET_PRIVACY_LEVEL,    // privacy light: 0..100 / --
+        SET_PRIVACY_LEVEL,    // value = level, or a step when relative
     };
     Type type = Type::NONE;
     int value = 0;
     double float_value = 0.0;  // for set_absolute_brightness (nits is a double)
     std::string mode;
+    bool relative = false;     // --privacy-level=+N / -N
     bool json_output = false;
 };
 
@@ -83,7 +88,13 @@ void printUsage(const char* program_name) {
               << "  --absolute-brightness=N   Set brightness to N nits (requires calibrated LUT)\n"
               << "  --max-brightness          Print max nits supported by the loaded calibration LUT\n"
               << "  --min-brightness          Print min nits supported by the loaded calibration LUT\n"
-              << "  --calibration-info        Show LUT status, range, label, output_type tag\n\n"
+              << "  --calibration-info        Show LUT status, range, label, output_type tag\n"
+              << "  --privacy                 Print the privacy film: on / off (-- where the FPGA image\n"
+              << "                            has no film drive)\n"
+              << "  --privacy=on|off|toggle   Switch the privacy film (saved; prints the new state)\n"
+              << "  --privacy-level           Print the privacy-light level 0-100 (-- without the light)\n"
+              << "  --privacy-level=N|+N|-N   Set the privacy-light level, or step it, clamped to 0-100\n"
+              << "                            (saved; prints the new level)\n\n"
               << "Examples:\n"
               << "  " << program_name << " --status\n"
               << "  " << program_name << " --brightness=75\n"
@@ -221,6 +232,33 @@ bool parseArguments(int argc, char* argv[], ConnectionConfig& conn, CommandConfi
             cmd.type = CommandConfig::Type::GET_MIN_BRIGHTNESS;
         } else if (arg == "--calibration-info") {
             cmd.type = CommandConfig::Type::GET_CALIBRATION_INFO;
+        } else if (arg == "--privacy") {
+            cmd.type = CommandConfig::Type::GET_PRIVACY;
+        } else if (arg.rfind("--privacy=", 0) == 0) {
+            cmd.type = CommandConfig::Type::SET_PRIVACY;
+            cmd.mode = parseArgValue(argv[i], "--privacy=");
+            if (cmd.mode != "on" && cmd.mode != "off" && cmd.mode != "toggle") {
+                std::cerr << "Error: --privacy= takes on, off or toggle\n\n";
+                return false;
+            }
+        } else if (arg == "--privacy-level") {
+            cmd.type = CommandConfig::Type::GET_PRIVACY_LEVEL;
+        } else if (arg.rfind("--privacy-level=", 0) == 0) {
+            cmd.type = CommandConfig::Type::SET_PRIVACY_LEVEL;
+            const std::string v = parseArgValue(argv[i], "--privacy-level=");
+            cmd.relative = !v.empty() && (v[0] == '+' || v[0] == '-');
+            try {
+                size_t used = 0;
+                cmd.value = std::stoi(v, &used);
+                if (used != v.size()) throw std::invalid_argument(v);
+            } catch (const std::exception&) {
+                std::cerr << "Error: --privacy-level= takes N (0-100), +N or -N\n\n";
+                return false;
+            }
+            if (!cmd.relative && (cmd.value < 0 || cmd.value > 100)) {
+                std::cerr << "Error: privacy level must be 0-100\n\n";
+                return false;
+            }
         } else if (arg == "--help" || arg == "-h") {
             return false;
         } else {
@@ -445,6 +483,25 @@ bool printResponse(const std::string& json_response, const CommandConfig& cmd) {
             if (printNumericOrUncalibrated(json_response, "min_nits")) return false;
             break;
         }
+        case CommandConfig::Type::GET_PRIVACY:
+        case CommandConfig::Type::SET_PRIVACY: {
+            // get: "--" where the image has no film drive (not an error, for key polls)
+            if (extractJsonValue(json_response, "available") != "true") {
+                std::cout << "--\n";
+                break;
+            }
+            std::cout << (extractJsonValue(json_response, "enabled") == "true" ? "on" : "off") << "\n";
+            break;
+        }
+        case CommandConfig::Type::GET_PRIVACY_LEVEL:
+        case CommandConfig::Type::SET_PRIVACY_LEVEL: {
+            if (extractJsonValue(json_response, "available") != "true") {
+                std::cout << "--\n";
+                break;
+            }
+            std::cout << extractJsonValue(json_response, "level") << "\n";
+            break;
+        }
         case CommandConfig::Type::GET_CALIBRATION_INFO: {
             std::string calibrated = extractJsonValue(json_response, "calibrated");
             if (calibrated != "true") {
@@ -516,6 +573,20 @@ int main(int argc, char* argv[]) {
         case CommandConfig::Type::GET_MIN_BRIGHTNESS:
         case CommandConfig::Type::GET_CALIBRATION_INFO:
             json_request = buildJsonRequest("get_calibration_info");
+            break;
+        case CommandConfig::Type::GET_PRIVACY:
+            json_request = buildJsonRequest("get_privacy_mode");
+            break;
+        case CommandConfig::Type::SET_PRIVACY:
+            json_request = std::string(R"({"version":"1.0","command":"set_privacy_mode","params":{)") +
+                           (cmd.mode == "toggle" ? R"("toggle":true)"
+                            : cmd.mode == "on" ? R"("enabled":true)" : R"("enabled":false)") + "}}";
+            break;
+        case CommandConfig::Type::GET_PRIVACY_LEVEL:
+            json_request = buildJsonRequest("get_privacy_status");
+            break;
+        case CommandConfig::Type::SET_PRIVACY_LEVEL:
+            json_request = buildJsonRequest("set_privacy_level", cmd.relative ? "delta" : "level", cmd.value);
             break;
         default:
             std::cerr << "Error: Invalid command\n";

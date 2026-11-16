@@ -524,7 +524,8 @@ so als-dimmer holds it:
   found, and re-checked every `poll_interval_sec` (5 s): an S4 that reset without the Pi (OTA,
   display-only power loss) gets the level back within one period.
 - **Commands:** `{"command":"set_privacy_level","params":{"level":40}}` applies (write + read-back)
-  and saves; `"persist": false` applies without saving (a slider while it is dragged).
+  and saves; `{"delta": 10}` / `{"delta": -10}` steps from the held level, clamped to 0-100, in one
+  request; `"persist": false` applies without saving (a slider while it is dragged).
   `{"command":"get_privacy_status"}` and every `get_status` report
   `"privacy": {"available", "level", "running", "reachable", "mcu_level"}`; disp-settings shows its
   Privacy light slider only when `available` is true. `set_privacy_level` answers `NOT_AVAILABLE`
@@ -549,8 +550,8 @@ restart (power cycle, `update-fpga.sh --activate`, JTAG), so als-dimmer holds it
   It is written when a supported image is found and re-checked every `poll_interval_sec` (5 s): any
   difference (FPGA restart, a write from another tool) is written back. Writes are read back
   (bit 0) and retried up to 3 times.
-- **Commands:** `{"command":"set_privacy_mode","params":{"enabled":true}}` applies and saves
-  (`NOT_AVAILABLE` where the image has no drive). `{"command":"get_privacy_mode"}` and every
+- **Commands:** `{"command":"set_privacy_mode","params":{"enabled":true}}` applies and saves,
+  `{"toggle": true}` flips the held choice (`NOT_AVAILABLE` where the image has no drive). `{"command":"get_privacy_mode"}` and every
   `get_status` report `"privacy_mode": {"available", "enabled", "fpga_on", "reachable", "slave",
   "reason"}`, plus `"chip_id"`, `"version"`, `"slot"` once identified. `enabled` is the saved
   choice, `fpga_on` the FPGA's read-back. disp-settings shows its Privacy tile only when
@@ -559,6 +560,25 @@ restart (power cycle, `update-fpga.sh --activate`, JTAG), so als-dimmer holds it
   `poll_interval_sec` (5) and `require_ota_slot` (true) can be changed, and
   `"supported": [{"chip_id": "00010123", "min_version": "0x8B", "name": "12.3\" NQ5"}, ...]`
   replaces the built-in list (a new board or image needs no rebuild).
+
+### Privacy: one owner, every client through als-dimmer
+
+als-dimmer holds the privacy film and the privacy-light level and writes them back whenever the
+hardware holds something else, so a client that writes `0x1E`/`0x1D` `0x34` or IOC `0x0202`
+directly is undone within 5 s. disp-settings, the Stream Deck keys and scripts go through the
+control socket; from a shell, `als-dimmer-client`:
+
+```bash
+als-dimmer-client --use-unix-socket --privacy                 # on / off / -- (no film drive)
+als-dimmer-client --use-unix-socket --privacy=toggle          # on|off|toggle; prints the new state
+als-dimmer-client --use-unix-socket --privacy-level           # 0-100 / -- (no privacy light)
+als-dimmer-client --use-unix-socket --privacy-level=+10       # N|+N|-N; prints the new level
+```
+
+Changes from any client, and the re-applies, reach the `notification.on_change_script` as
+`privacy_changed on|off|unavailable` and `privacy_level_changed <0-100>|unavailable` (each sent
+once per change, like `mode_changed` / `brightness_changed`), so Stream Deck keys follow the UI;
+disp-settings picks them up from `get_status` within 500 ms.
 
 ### Thermal limiter (optional)
 
