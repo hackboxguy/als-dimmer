@@ -1135,12 +1135,10 @@ int main(int argc, char* argv[]) {
     bool manual_override_occurred = false;
     std::string manual_override_type = "";
 
-    while (!should_exit && !g_shutdown_requested.load()) {
-        // Privacy light: find it / re-assert the level (I2C only when a check is due)
-        privacy.poll();
-        privacy_mode.poll();
-
-        // Process TCP commands
+    // Answer queued control commands. Runs at the top of every loop pass and, between passes,
+    // every 10 ms of the update-interval sleep, so a client waits ~10 ms instead of up to a whole
+    // interval (500 ms); the control loop itself keeps its rhythm.
+    auto drainCommands = [&]() {
         while (control.hasCommand()) {
             als_dimmer::QueuedCommand queued = control.getNextCommand();
 
@@ -1162,6 +1160,15 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
+    };
+
+    while (!should_exit && !g_shutdown_requested.load()) {
+        // Privacy light: find it / re-assert the level (I2C only when a check is due)
+        privacy.poll();
+        privacy_mode.poll();
+
+        // Process TCP commands
+        drainCommands();
 
         // Check for auto-resume from MANUAL_TEMPORARY (skip when sensor is unavailable)
         if (sensor_available &&
@@ -1438,8 +1445,17 @@ int main(int argc, char* argv[]) {
             state_mgr.save();
         }
 
-        // Sleep for update interval
-        std::this_thread::sleep_for(std::chrono::milliseconds(config.control.update_interval_ms));
+        // Sleep for the update interval, answering commands as they arrive
+        const auto pass_end = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(config.control.update_interval_ms);
+        while (!should_exit && !g_shutdown_requested.load() &&
+               std::chrono::steady_clock::now() < pass_end) {
+            if (control.hasCommand()) {
+                drainCommands();
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
     }
 
     // Cleanup
